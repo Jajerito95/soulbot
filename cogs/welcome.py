@@ -17,6 +17,22 @@ DEFAULT_WELCOME = (
 )
 
 
+def build_welcome_embed(member: discord.Member, template: str) -> discord.Embed:
+    text = template.format(
+        mention=member.mention,
+        user=member.display_name,
+        member_count=member.guild.member_count,
+    )
+    embed = discord.Embed(description=text, color=COLOR)
+    embed.set_author(name=f"👋 ¡Bienvenido al servidor, {member.display_name}!")
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.add_field(name="🆔 Usuario", value=member.mention, inline=True)
+    embed.add_field(name="👥 Miembros totales", value=f"`{member.guild.member_count}`", inline=True)
+    embed.timestamp = discord.utils.utcnow()
+    embed.set_footer(text="SoulBot System")
+    return embed
+
+
 class WelcomeCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -75,19 +91,7 @@ class WelcomeCog(commands.Cog):
             return
 
         template = config["welcome_message"] or DEFAULT_WELCOME
-        text = template.format(
-            mention=member.mention,
-            user=member.display_name,
-            member_count=guild.member_count,
-        )
-
-        embed = discord.Embed(description=text, color=COLOR)
-        embed.set_author(name=f"👋 ¡Bienvenido al servidor, {member.display_name}!")
-        embed.set_thumbnail(url=member.display_avatar.url)
-        embed.add_field(name="🆔 Usuario", value=member.mention, inline=True)
-        embed.add_field(name="👥 Miembros totales", value=f"`{guild.member_count}`", inline=True)
-        embed.timestamp = discord.utils.utcnow()
-        embed.set_footer(text="SoulBot System")
+        embed = build_welcome_embed(member, template)
         await channel.send(embed=embed)
 
     invites_group = app_commands.Group(name="invites", description="Sistema de invitaciones")

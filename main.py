@@ -15,7 +15,7 @@ INTENTS = discord.Intents.default()
 INTENTS.members = True
 INTENTS.message_content = False
 
-COGS = ["cogs.embed", "cogs.welcome", "cogs.suggestions", "cogs.setup", "cogs.logs"]
+COGS = ["cogs.embed", "cogs.welcome", "cogs.suggestions", "cogs.setup", "cogs.logs", "cogs.test", "cogs.emojiful"]
 
 
 class SoulBot(commands.Bot):
