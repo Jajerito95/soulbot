@@ -13,9 +13,10 @@ log = logging.getLogger("soulbot")
 
 INTENTS = discord.Intents.default()
 INTENTS.members = True
-INTENTS.message_content = False
+INTENTS.message_content = True
+INTENTS.presences = True
 
-COGS = ["cogs.embed", "cogs.welcome", "cogs.suggestions", "cogs.setup", "cogs.logs", "cogs.test", "cogs.emojiful"]
+COGS = ["cogs.embed", "cogs.welcome", "cogs.suggestions", "cogs.tickets", "cogs.setup", "cogs.logs", "cogs.test", "cogs.emojiful", "cogs.purge", "cogs.sanction", "cogs.automod", "cogs.levels"]
 
 
 class SoulBot(commands.Bot):

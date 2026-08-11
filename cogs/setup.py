@@ -5,7 +5,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from database import update_guild_config, get_guild_config
-from utils.embeds import success_embed
+from utils.embeds import success_embed, error_embed
+from cogs.tickets import build_panel_embed, TicketPanelView, load_categories
 
 
 class SetupCog(commands.Cog):
@@ -142,6 +143,109 @@ class SetupCog(commands.Cog):
                 f"🎭 Roles: {flag(config['logs_roles'])}\n"
                 f"📁 Canales: {flag(config['logs_channels'])}",
                 title="📜 Configuración de logs",
+            ),
+            ephemeral=True,
+        )
+
+    @setup_group.command(name="tickets", description="Configura el sistema de Tickets")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(
+        categoria="Categoría de Discord donde se crean los tickets",
+        staff_role="Rol que puede ver y gestionar los tickets",
+        canal_panel="Canal donde se enviará el panel de apertura",
+        canal_logs="Canal donde se registran los tickets cerrados (con transcript)",
+        categorias="Lista de categorías separadas por coma (ej: Soporte,Reportes,Apelaciones)",
+        max_activos="Máximo de tickets abiertos a la vez antes de poner en cola",
+        pausado="Pausa manualmente la apertura de nuevos tickets (van a cola)",
+        enviar_panel="Envía/actualiza el panel en el canal configurado",
+    )
+    async def setup_tickets(
+        self,
+        interaction: discord.Interaction,
+        categoria: Optional[discord.CategoryChannel] = None,
+        staff_role: Optional[discord.Role] = None,
+        canal_panel: Optional[discord.TextChannel] = None,
+        canal_logs: Optional[discord.TextChannel] = None,
+        categorias: Optional[str] = None,
+        max_activos: Optional[int] = None,
+        pausado: Optional[bool] = None,
+        enviar_panel: Optional[bool] = None,
+    ):
+        fields = {}
+        if categoria is not None:
+            fields["tickets_category_id"] = categoria.id
+        if staff_role is not None:
+            fields["tickets_staff_role_id"] = staff_role.id
+        if canal_panel is not None:
+            fields["tickets_panel_channel_id"] = canal_panel.id
+        if canal_logs is not None:
+            fields["tickets_log_channel_id"] = canal_logs.id
+        if categorias is not None:
+            import json
+            parsed = [[name.strip(), "🎫"] for name in categorias.split(",") if name.strip()]
+            fields["tickets_categories"] = json.dumps(parsed, ensure_ascii=False)
+        if max_activos is not None:
+            fields["tickets_max_active"] = max_activos
+        if pausado is not None:
+            fields["tickets_paused"] = int(pausado)
+
+        if fields:
+            await update_guild_config(interaction.guild_id, **fields)
+
+        config = await get_guild_config(interaction.guild_id)
+
+        if enviar_panel:
+            target = canal_panel or (interaction.guild.get_channel(config["tickets_panel_channel_id"]) if config["tickets_panel_channel_id"] else None)
+            if not target:
+                await interaction.response.send_message(
+                    embed=error_embed("Configura primero `canal_panel` antes de enviar el panel."), ephemeral=True
+                )
+                return
+            view = TicketPanelView(load_categories(config))
+            self.bot.add_view(view)
+            await target.send(embed=build_panel_embed(), view=view)
+
+        categoria_txt = f"<#{config['tickets_category_id']}>" if config["tickets_category_id"] else "No configurada"
+        staff_txt = f"<@&{config['tickets_staff_role_id']}>" if config["tickets_staff_role_id"] else "No configurado"
+        panel_txt = f"<#{config['tickets_panel_channel_id']}>" if config["tickets_panel_channel_id"] else "No configurado"
+        logs_txt = f"<#{config['tickets_log_channel_id']}>" if config["tickets_log_channel_id"] else "No configurado"
+        pausado_txt = "⏸️ Sí" if config["tickets_paused"] else "▶️ No"
+
+        await interaction.response.send_message(
+            embed=success_embed(
+                f"📂 Categoría: {categoria_txt}\n🛡️ Rol Staff: {staff_txt}\n📌 Canal panel: {panel_txt}\n"
+                f"📜 Canal logs: {logs_txt}\n🔢 Máx. activos: **{config['tickets_max_active']}**\n⏸️ Pausado: {pausado_txt}",
+                title="🎫 Configuración de Tickets",
+            ),
+            ephemeral=True,
+        )
+
+    @setup_group.command(name="levels", description="Configura el canal de anuncios de subida de nivel")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(canal="Canal donde se anuncian las subidas de nivel (vacío = mismo canal del mensaje)")
+    async def setup_levels(self, interaction: discord.Interaction, canal: Optional[discord.TextChannel] = None):
+        if canal is not None:
+            await update_guild_config(interaction.guild_id, levels_announce_channel_id=canal.id)
+        config = await get_guild_config(interaction.guild_id)
+        canal_txt = f"<#{config['levels_announce_channel_id']}>" if config["levels_announce_channel_id"] else "Mismo canal del mensaje"
+        await interaction.response.send_message(embed=success_embed(f"📢 Canal de anuncios de nivel: {canal_txt}"), ephemeral=True)
+
+    @setup_group.command(name="automod", description="Activa o desactiva el AutoMod (spam, flood, mayúsculas, ghost ping, publicidad)")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(activo="Activar o desactivar el AutoMod")
+    async def setup_automod(self, interaction: discord.Interaction, activo: Optional[bool] = None):
+        if activo is not None:
+            await update_guild_config(interaction.guild_id, automod_enabled=int(activo))
+
+        config = await get_guild_config(interaction.guild_id)
+        estado = "✅ Activado" if config["automod_enabled"] else "❌ Desactivado"
+        await interaction.response.send_message(
+            embed=success_embed(
+                f"Estado: {estado}\n\n"
+                "Detecta automáticamente: Spam, Flood, Mayúsculas excesivas, Ghost Ping y Publicidad (invites), "
+                "aplicando la sanción del catálogo según reincidencia.\n"
+                "⚠️ El Staff (permiso `moderate_members`) está exento.",
+                title="🤖 AutoMod",
             ),
             ephemeral=True,
         )

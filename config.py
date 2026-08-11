@@ -18,3 +18,13 @@ BOT_NAME = "SoulBot System"
 COLOR = 0x5865F2
 COLOR_SUCCESS = 0x57F287
 COLOR_ERROR = 0xED4245
+
+# Carpeta persistente para guardar transcripts de tickets (en Render, apunta al disco montado)
+DATA_DIR = os.getenv("DATA_DIR", "data")
+
+# Contraseña de confirmación para /levels resetserver (cámbiala en producción vía variable de entorno)
+RESET_PASSWORD = os.getenv("RESET_PASSWORD", "Chroma")
+
+# URL pública del servicio (la de Render), usada para enlazar transcripts en HTML.
+# Si no se define, se usa localhost (solo sirve en pruebas locales).
+PUBLIC_URL = os.getenv("PUBLIC_URL", f"http://localhost:{PORT}")
