@@ -5,7 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from database import db, get_guild_config
-from utils.embeds import success_embed, error_embed
+from utils.embeds import success_embed, error_embed, get_footer_icon
 from config import BRAND, COLOR
 
 DEFAULT_WELCOME = (
@@ -29,7 +29,7 @@ def build_welcome_embed(member: discord.Member, template: str) -> discord.Embed:
     embed.add_field(name="🆔 Usuario", value=member.mention, inline=True)
     embed.add_field(name="👥 Miembros totales", value=f"`{member.guild.member_count}`", inline=True)
     embed.timestamp = discord.utils.utcnow()
-    embed.set_footer(text="SoulBot System")
+    embed.set_footer(text="SoulBot System", icon_url=get_footer_icon())
     return embed
 
 

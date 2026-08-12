@@ -8,7 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import database as db
-from utils.embeds import success_embed, error_embed, base_embed
+from utils.embeds import success_embed, error_embed, base_embed, get_footer_icon
 from utils.transcripts import generate_transcript
 from config import COLOR, COLOR_ERROR, PUBLIC_URL
 
@@ -42,7 +42,7 @@ def build_panel_embed() -> discord.Embed:
     embed.add_field(name="4️⃣ Elige la categoría correcta", value="Abre tickets en la categoría adecuada para evitar sanciones.", inline=False)
     embed.add_field(name="5️⃣ Evita abrir tickets sin motivo", value="Los tickets sin razón válida son sancionables.", inline=False)
     embed.add_field(name="🙏 Te atenderemos lo más rápido posible", value="Gracias por tu paciencia y comprensión.", inline=False)
-    embed.set_footer(text="SoulSeeker™ | All rights reserved.")
+    embed.set_footer(text="SoulSeeker™ | All rights reserved.", icon_url=get_footer_icon())
     return embed
 
 

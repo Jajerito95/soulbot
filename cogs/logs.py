@@ -4,13 +4,11 @@ from discord.ext import commands
 
 from database import get_guild_config, log_staff_action
 from config import COLOR, COLOR_ERROR
+from utils.embeds import base_embed
 
 
 def log_embed(title: str, description: str, color: int = COLOR) -> discord.Embed:
-    embed = discord.Embed(title=title, description=description, color=color)
-    embed.timestamp = discord.utils.utcnow()
-    embed.set_footer(text="SoulBot System")
-    return embed
+    return base_embed(description, color, title)
 
 
 class LogsCog(commands.Cog):

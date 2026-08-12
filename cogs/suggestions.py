@@ -20,7 +20,8 @@ def build_suggestion_embed(content: str, author: discord.abc.User, status: str, 
     embed.add_field(name="🟢 Sí", value=str(yes), inline=True)
     embed.add_field(name="🔴 No", value=str(no), inline=True)
     embed.add_field(name="Estado", value=status_text, inline=False)
-    embed.set_footer(text=f"Propuesta por: {author.display_name}")
+    embed.set_footer(text=f"Propuesta por: {author.display_name} • SoulBot System", icon_url=author.display_avatar.url)
+    embed.timestamp = discord.utils.utcnow()
     return embed
 
 

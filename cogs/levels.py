@@ -9,7 +9,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import database as db
-from utils.embeds import success_embed, error_embed, base_embed
+from utils.embeds import success_embed, error_embed, base_embed, get_footer_icon
 from utils.levels_engine import award_xp, level_from_xp, progress_bar, xp_for_level
 from config import COLOR, COLOR_ERROR, RESET_PASSWORD
 
@@ -154,7 +154,8 @@ class LevelsCog(commands.Cog):
         embed.add_field(name="🏆 Posición", value=f"`#{position}`", inline=True)
         embed.add_field(name="✨ XP total", value=f"`{data['xp']}`", inline=True)
         embed.add_field(name="📈 Progreso", value=f"{bar} `{xp_in_level}/{xp_needed}`", inline=False)
-        embed.set_footer(text="SoulBot System")
+        embed.set_footer(text="SoulBot System", icon_url=get_footer_icon())
+        embed.timestamp = discord.utils.utcnow()
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="leaderboard", description="Top 10 del servidor por XP")

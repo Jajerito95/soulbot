@@ -6,6 +6,7 @@ import database as db
 from cogs.sanction_data import INFRACTIONS, get_punishment
 from cogs.logs import log_embed
 from config import COLOR_ERROR
+from utils.embeds import base_embed
 
 IMGUR_RE = re.compile(r"^https?://(www\.)?(i\.)?imgur\.com/.+", re.IGNORECASE)
 
@@ -52,11 +53,11 @@ async def apply_sanction(
 
     try:
         await member.send(
-            embed=discord.Embed(
-                title="🛡️ Sanción aplicada",
-                description=f"Has recibido una sanción en **{guild.name}**.\n"
+            embed=base_embed(
+                f"Has recibido una sanción en **{guild.name}**.\n"
                 f"⚙️ Infracción: {label}\n📝 Razón: {reason}\n⚖️ Sanción: {punishment_label(punishment)}",
-                color=COLOR_ERROR,
+                COLOR_ERROR,
+                title="🛡️ Sanción aplicada",
             )
         )
     except discord.Forbidden:

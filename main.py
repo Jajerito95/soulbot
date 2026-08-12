@@ -44,6 +44,8 @@ bot = SoulBot()
 @bot.event
 async def on_ready():
     log.info(f"✅ SoulBot conectado como {bot.user} ({bot.user.id})")
+    from utils.embeds import set_footer_icon
+    set_footer_icon(bot.user.display_avatar.url)
     await bot.change_presence(activity=discord.Game(name="SoulSeeker™"))
 
 
