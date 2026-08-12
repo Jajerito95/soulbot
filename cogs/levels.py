@@ -50,6 +50,9 @@ class LevelsCog(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
+        config = await db.get_guild_config(message.guild.id)
+        if not config["levels_enabled"]:
+            return
         now = time.time()
         last = self.last_message.get(message.author.id, 0)
         if now - last < MESSAGE_COOLDOWN:
@@ -64,6 +67,9 @@ class LevelsCog(commands.Cog):
     @tasks.loop(minutes=1)
     async def voice_xp_loop(self):
         for guild in self.bot.guilds:
+            config = await db.get_guild_config(guild.id)
+            if not config["levels_enabled"]:
+                continue
             for channel in guild.voice_channels:
                 if channel == guild.afk_channel:
                     continue
@@ -205,6 +211,16 @@ class LevelsCog(commands.Cog):
         default_permissions=discord.Permissions(manage_guild=True),
     )
 
+    @levels_group.command(name="enable", description="Reactiva la ganancia de XP en el servidor")
+    async def levels_enable(self, interaction: discord.Interaction):
+        await db.update_guild_config(interaction.guild_id, levels_enabled=1)
+        await interaction.response.send_message(embed=success_embed("✅ Sistema de niveles **activado**. Se vuelve a ganar XP normalmente."))
+
+    @levels_group.command(name="disable", description="Pausa la ganancia de XP (mensajes y voz) sin borrar niveles ya obtenidos")
+    async def levels_disable(self, interaction: discord.Interaction):
+        await db.update_guild_config(interaction.guild_id, levels_enabled=0)
+        await interaction.response.send_message(embed=success_embed("⏸️ Sistema de niveles **pausado**. Nadie ganará XP hasta que uses `/levels enable`. Los niveles y XP actuales no se tocan."))
+
     @levels_group.command(name="rewardsetup", description="Configura una recompensa de rol para un nivel")
     @app_commands.describe(nivel="Nivel requerido", rol="Rol que se otorga")
     async def rewardsetup(self, interaction: discord.Interaction, nivel: int, rol: discord.Role):
@@ -337,15 +353,19 @@ class LevelsCog(commands.Cog):
         await interaction.response.defer()
         raw = (await archivo.read()).decode("utf-8", errors="ignore")
         rows = [line.strip().split(",") for line in raw.splitlines() if line.strip()]
-        if rows and rows[0][0].lower() in ("user_id", "usuario", "id"):
+        header = rows[0][0].lower() if rows else ""
+        by_username = header in ("username", "user", "usuario", "nombre")
+        if rows and rows[0][0].lower() in ("user_id", "usuario", "id", "username", "user", "nombre"):
             rows = rows[1:]
 
         await db.create_import_job(interaction.guild_id, interaction.user.id, len(rows))
         self.import_jobs[interaction.guild_id] = False
 
-        await interaction.followup.send(embed=success_embed(f"Importando **{len(rows)}** registros. Usa `/import progress` para ver el avance."))
+        mode_txt = "por username (buscando en los miembros del servidor)" if by_username else "por user_id"
+        await interaction.followup.send(embed=success_embed(f"Importando **{len(rows)}** registros {mode_txt}. Usa `/import progress` para ver el avance."))
 
         imported = 0
+        not_found = []
         for row in rows:
             if self.import_jobs.get(interaction.guild_id):
                 await db.set_import_status(interaction.guild_id, "cancelled")
@@ -353,9 +373,26 @@ class LevelsCog(commands.Cog):
             if len(row) < 3:
                 continue
             try:
-                user_id, level, xp = int(row[0]), int(row[1]), int(row[2])
+                level, xp = int(row[1]), int(row[2])
             except ValueError:
                 continue
+
+            if by_username:
+                username = row[0].strip().lstrip("@").lower()
+                member = discord.utils.find(
+                    lambda m: m.name.lower() == username or (m.global_name or "").lower() == username,
+                    interaction.guild.members,
+                )
+                if not member:
+                    not_found.append(row[0])
+                    continue
+                user_id = member.id
+            else:
+                try:
+                    user_id = int(row[0])
+                except ValueError:
+                    continue
+
             await db.set_level_data(interaction.guild_id, user_id, xp, level)
             imported += 1
             if imported % 25 == 0:
@@ -363,6 +400,11 @@ class LevelsCog(commands.Cog):
 
         await db.update_import_progress(interaction.guild_id, imported)
         await db.set_import_status(interaction.guild_id, "done")
+
+        summary = f"✅ Importados: **{imported}**"
+        if not_found:
+            summary += f"\n⚠️ No encontrados en el servidor ({len(not_found)}): {', '.join(not_found[:15])}" + ("..." if len(not_found) > 15 else "")
+        await interaction.channel.send(embed=success_embed(summary, title="📥 Importación completada"))
 
     @import_group.command(name="progress", description="Muestra el progreso de la importación en curso")
     async def import_progress(self, interaction: discord.Interaction):

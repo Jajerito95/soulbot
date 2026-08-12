@@ -1,15 +1,23 @@
 from __future__ import annotations
 from typing import Optional
-"""Capa de persistencia - SQLite ligero (aiosqlite). Un archivo, esquema mínimo."""
+"""Capa de persistencia. Usa Turso (nube, persistente) si está configurado,
+o SQLite local (aiosqlite) como fallback para desarrollo."""
 import aiosqlite
-from config import DB_PATH
+from config import DB_PATH, TURSO_DATABASE_URL, TURSO_AUTH_TOKEN
 
-_db: Optional[aiosqlite.Connection] = None
+_db = None
+USING_TURSO = False
 
 
 async def init_db():
-    global _db
-    _db = await aiosqlite.connect(DB_PATH)
+    global _db, USING_TURSO
+    if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN:
+        import turso_shim
+        _db = await turso_shim.connect(TURSO_DATABASE_URL, TURSO_AUTH_TOKEN)
+        USING_TURSO = True
+    else:
+        _db = await aiosqlite.connect(DB_PATH)
+        USING_TURSO = False
     await _db.executescript(
         """
         CREATE TABLE IF NOT EXISTS guild_config (
@@ -167,6 +175,7 @@ async def init_db():
         "xp_global_multiplier_expires": "TEXT",
         "xp_weekend_enabled": "INTEGER DEFAULT 0",
         "levels_announce_channel_id": "INTEGER",
+        "levels_enabled": "INTEGER DEFAULT 1",
     }
     for col, col_type in new_cols.items():
         if col not in existing_cols:
@@ -179,7 +188,7 @@ async def init_db():
     await _db.commit()
 
 
-def db() -> aiosqlite.Connection:
+def db():
     return _db
 
 

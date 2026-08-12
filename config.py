@@ -6,6 +6,11 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 DB_PATH = os.getenv("DB_PATH", "soulbot.db")
+
+# Turso (SQLite-compatible en la nube). Si están definidas, se usa en vez del
+# archivo local — necesario porque Render Free no persiste disco entre reinicios.
+TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
+TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
 PORT = int(os.getenv("PORT", 8080))
 
 # Opcional: si se define, los comandos slash se sincronizan solo en este servidor
