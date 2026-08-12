@@ -80,7 +80,7 @@ class SanctionCog(commands.Cog):
                 embed=base_embed(
                     f"⚠️ Has recibido un **warn** en **{interaction.guild.name}**.\n📝 Razón: {razon}",
                     COLOR_ERROR,
-                    title="Advertencia",
+                    title="⚠️ Advertencia",
                 )
             )
         except discord.Forbidden:
@@ -122,7 +122,7 @@ class SanctionCog(commands.Cog):
                 embed=base_embed(
                     f"🔨 Has sido **baneado** de **{interaction.guild.name}**.\n📝 Razón: {razon}",
                     COLOR_ERROR,
-                    title="Ban",
+                    title="🔨 Ban",
                 )
             )
         except discord.Forbidden:
