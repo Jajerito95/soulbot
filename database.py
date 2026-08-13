@@ -152,6 +152,47 @@ async def init_db():
             started_by INTEGER,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS economy (
+            guild_id INTEGER,
+            user_id INTEGER,
+            balance INTEGER DEFAULT 0,
+            last_daily TEXT,
+            PRIMARY KEY (guild_id, user_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS shop_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            name TEXT,
+            price INTEGER,
+            type TEXT,
+            role_id INTEGER,
+            boost_multiplier REAL,
+            boost_minutes INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS appeals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            sanction_id INTEGER,
+            user_id INTEGER,
+            reason TEXT,
+            evidence_url TEXT,
+            status TEXT DEFAULT 'pending',
+            reviewed_by INTEGER,
+            reviewed_at TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS temp_roles (
+            guild_id INTEGER,
+            user_id INTEGER,
+            role_id INTEGER,
+            expires_at TEXT,
+            assigned_by INTEGER,
+            PRIMARY KEY (guild_id, user_id, role_id)
+        );
         """
     )
     # Migración simple para bases de datos ya existentes (añade columnas nuevas si faltan)
@@ -176,6 +217,7 @@ async def init_db():
         "xp_weekend_enabled": "INTEGER DEFAULT 0",
         "levels_announce_channel_id": "INTEGER",
         "levels_enabled": "INTEGER DEFAULT 1",
+        "appeals_channel_id": "INTEGER",
     }
     for col, col_type in new_cols.items():
         if col not in existing_cols:
@@ -522,3 +564,221 @@ async def update_import_progress(guild_id: int, progress: int):
 async def set_import_status(guild_id: int, status: str):
     await _db.execute("UPDATE import_jobs SET status = ? WHERE guild_id = ?", (status, guild_id))
     await _db.commit()
+
+
+# ---------- economía (SoulCoins) ----------
+
+async def get_balance(guild_id: int, user_id: int) -> int:
+    cur = await _db.execute("SELECT balance FROM economy WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+    row = await cur.fetchone()
+    return row[0] if row else 0
+
+
+async def add_coins(guild_id: int, user_id: int, amount: int) -> int:
+    """Suma (o resta si amount es negativo) SoulCoins. Nunca deja el balance por debajo de 0."""
+    current = await get_balance(guild_id, user_id)
+    new_balance = max(0, current + amount)
+    await _db.execute(
+        """INSERT INTO economy (guild_id, user_id, balance) VALUES (?, ?, ?)
+           ON CONFLICT(guild_id, user_id) DO UPDATE SET balance = ?""",
+        (guild_id, user_id, new_balance, new_balance),
+    )
+    await _db.commit()
+    return new_balance
+
+
+async def set_balance(guild_id: int, user_id: int, amount: int):
+    amount = max(0, amount)
+    await _db.execute(
+        """INSERT INTO economy (guild_id, user_id, balance) VALUES (?, ?, ?)
+           ON CONFLICT(guild_id, user_id) DO UPDATE SET balance = ?""",
+        (guild_id, user_id, amount, amount),
+    )
+    await _db.commit()
+
+
+async def get_last_daily(guild_id: int, user_id: int) -> Optional[str]:
+    cur = await _db.execute("SELECT last_daily FROM economy WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+    row = await cur.fetchone()
+    return row[0] if row else None
+
+
+async def set_last_daily(guild_id: int, user_id: int, timestamp: str):
+    await _db.execute(
+        """INSERT INTO economy (guild_id, user_id, last_daily) VALUES (?, ?, ?)
+           ON CONFLICT(guild_id, user_id) DO UPDATE SET last_daily = ?""",
+        (guild_id, user_id, timestamp, timestamp),
+    )
+    await _db.commit()
+
+
+async def get_economy_leaderboard(guild_id: int, limit: int = 10) -> list[tuple[int, int]]:
+    cur = await _db.execute(
+        "SELECT user_id, balance FROM economy WHERE guild_id = ? ORDER BY balance DESC LIMIT ?", (guild_id, limit)
+    )
+    return await cur.fetchall()
+
+
+# ---------- tienda ----------
+
+async def add_shop_item(guild_id: int, name: str, price: int, item_type: str,
+                         role_id: Optional[int] = None, boost_multiplier: Optional[float] = None,
+                         boost_minutes: Optional[int] = None) -> int:
+    cur = await _db.execute(
+        """INSERT INTO shop_items (guild_id, name, price, type, role_id, boost_multiplier, boost_minutes)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (guild_id, name, price, item_type, role_id, boost_multiplier, boost_minutes),
+    )
+    await _db.commit()
+    return cur.lastrowid
+
+
+async def get_shop_items(guild_id: int) -> list[dict]:
+    cur = await _db.execute("SELECT * FROM shop_items WHERE guild_id = ? ORDER BY price", (guild_id,))
+    rows = await cur.fetchall()
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, row)) for row in rows]
+
+
+async def get_shop_item(guild_id: int, item_id: int) -> Optional[dict]:
+    cur = await _db.execute("SELECT * FROM shop_items WHERE guild_id = ? AND id = ?", (guild_id, item_id))
+    row = await cur.fetchone()
+    if not row:
+        return None
+    cols = [d[0] for d in cur.description]
+    return dict(zip(cols, row))
+
+
+async def remove_shop_item(guild_id: int, item_id: int) -> bool:
+    cur = await _db.execute("DELETE FROM shop_items WHERE guild_id = ? AND id = ?", (guild_id, item_id))
+    await _db.commit()
+    return cur.rowcount > 0 if hasattr(cur, "rowcount") else True
+
+
+# ---------- appeals ----------
+
+async def get_sanction_by_id(guild_id: int, sanction_id: int) -> Optional[dict]:
+    cur = await _db.execute(
+        "SELECT * FROM staff_actions WHERE guild_id = ? AND id = ?", (guild_id, sanction_id)
+    )
+    row = await cur.fetchone()
+    if not row:
+        return None
+    cols = [d[0] for d in cur.description]
+    return dict(zip(cols, row))
+
+
+async def create_appeal(guild_id: int, sanction_id: int, user_id: int, reason: str, evidence_url: Optional[str]) -> int:
+    cur = await _db.execute(
+        "INSERT INTO appeals (guild_id, sanction_id, user_id, reason, evidence_url) VALUES (?, ?, ?, ?, ?)",
+        (guild_id, sanction_id, user_id, reason, evidence_url),
+    )
+    await _db.commit()
+    return cur.lastrowid
+
+
+async def get_appeal(appeal_id: int) -> Optional[dict]:
+    cur = await _db.execute("SELECT * FROM appeals WHERE id = ?", (appeal_id,))
+    row = await cur.fetchone()
+    if not row:
+        return None
+    cols = [d[0] for d in cur.description]
+    return dict(zip(cols, row))
+
+
+async def get_pending_appeal_for_sanction(guild_id: int, sanction_id: int) -> Optional[dict]:
+    cur = await _db.execute(
+        "SELECT * FROM appeals WHERE guild_id = ? AND sanction_id = ? AND status = 'pending'", (guild_id, sanction_id)
+    )
+    row = await cur.fetchone()
+    if not row:
+        return None
+    cols = [d[0] for d in cur.description]
+    return dict(zip(cols, row))
+
+
+async def get_user_appeals(guild_id: int, user_id: int) -> list[dict]:
+    cur = await _db.execute(
+        "SELECT * FROM appeals WHERE guild_id = ? AND user_id = ? ORDER BY created_at DESC", (guild_id, user_id)
+    )
+    rows = await cur.fetchall()
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, row)) for row in rows]
+
+
+async def resolve_appeal(appeal_id: int, status: str, reviewed_by: int):
+    await _db.execute(
+        "UPDATE appeals SET status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (status, reviewed_by, appeal_id),
+    )
+    await _db.commit()
+
+
+# ---------- backups (config del servidor, no historial transaccional) ----------
+
+async def export_guild_data(guild_id: int) -> dict:
+    config = await get_guild_config(guild_id)
+    rewards_cur = await _db.execute("SELECT level, role_id FROM level_rewards WHERE guild_id = ?", (guild_id,))
+    rewards = await rewards_cur.fetchall()
+    shop_cur = await _db.execute(
+        "SELECT name, price, type, role_id, boost_multiplier, boost_minutes FROM shop_items WHERE guild_id = ?",
+        (guild_id,),
+    )
+    shop = await shop_cur.fetchall()
+
+    return {
+        "guild_config": dict(config),
+        "level_rewards": [{"level": r[0], "role_id": r[1]} for r in rewards],
+        "shop_items": [
+            {"name": s[0], "price": s[1], "type": s[2], "role_id": s[3], "boost_multiplier": s[4], "boost_minutes": s[5]}
+            for s in shop
+        ],
+    }
+
+
+async def import_guild_data(guild_id: int, data: dict):
+    config = dict(data.get("guild_config", {}))
+    config.pop("guild_id", None)
+    if config:
+        await update_guild_config(guild_id, **config)
+
+    for reward in data.get("level_rewards", []):
+        await add_level_reward(guild_id, reward["level"], reward["role_id"])
+
+    for item in data.get("shop_items", []):
+        await add_shop_item(
+            guild_id, item["name"], item["price"], item["type"],
+            role_id=item.get("role_id"), boost_multiplier=item.get("boost_multiplier"), boost_minutes=item.get("boost_minutes"),
+        )
+
+
+# ---------- roles temporales ----------
+
+async def add_temp_role(guild_id: int, user_id: int, role_id: int, expires_at: str, assigned_by: int):
+    await _db.execute(
+        """INSERT INTO temp_roles (guild_id, user_id, role_id, expires_at, assigned_by) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(guild_id, user_id, role_id) DO UPDATE SET expires_at = ?, assigned_by = ?""",
+        (guild_id, user_id, role_id, expires_at, assigned_by, expires_at, assigned_by),
+    )
+    await _db.commit()
+
+
+async def remove_temp_role_record(guild_id: int, user_id: int, role_id: int):
+    await _db.execute(
+        "DELETE FROM temp_roles WHERE guild_id = ? AND user_id = ? AND role_id = ?", (guild_id, user_id, role_id)
+    )
+    await _db.commit()
+
+
+async def get_due_temp_roles() -> list[tuple[int, int, int]]:
+    import datetime
+    now = datetime.datetime.utcnow().isoformat()
+    cur = await _db.execute("SELECT guild_id, user_id, role_id FROM temp_roles WHERE expires_at <= ?", (now,))
+    return await cur.fetchall()
+
+
+async def get_active_temp_roles(guild_id: int, user_id: int) -> list[tuple[int, str]]:
+    cur = await _db.execute(
+        "SELECT role_id, expires_at FROM temp_roles WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+    )
+    return await cur.fetchall()

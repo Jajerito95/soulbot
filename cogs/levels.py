@@ -96,6 +96,8 @@ class LevelsCog(commands.Cog):
             return
 
         desc = f"🎉 {member.mention} ha subido a **nivel {result['new_level']}**!"
+        if result.get("coins_awarded"):
+            desc += f"\n💰 +{result['coins_awarded']} SoulCoins"
         if result["new_roles"]:
             desc += "\n🎁 Nuevo rol: " + ", ".join(r.mention for r in result["new_roles"])
         try:

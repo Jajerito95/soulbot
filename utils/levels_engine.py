@@ -77,7 +77,11 @@ async def award_xp(guild: discord.Guild, member: discord.Member, base_amount: in
         await db.log_xp_event(guild.id, member.id, amount)
 
     new_roles = []
+    coins_awarded = 0
     if leveled_up:
+        coins_awarded = new_level * 10
+        await db.add_coins(guild.id, member.id, coins_awarded)
+
         rewards = await db.get_level_rewards(guild.id)
         for level, role_id in rewards:
             if level <= new_level:
@@ -89,7 +93,10 @@ async def award_xp(guild: discord.Guild, member: discord.Member, base_amount: in
                     except discord.Forbidden:
                         pass
 
-    return {"amount": amount, "new_xp": new_xp, "new_level": new_level, "leveled_up": leveled_up, "new_roles": new_roles}
+    return {
+        "amount": amount, "new_xp": new_xp, "new_level": new_level,
+        "leveled_up": leveled_up, "new_roles": new_roles, "coins_awarded": coins_awarded,
+    }
 
 
 def progress_bar(current: int, total: int, length: int = 12) -> str:

@@ -230,6 +230,16 @@ class SetupCog(commands.Cog):
         canal_txt = f"<#{config['levels_announce_channel_id']}>" if config["levels_announce_channel_id"] else "Mismo canal del mensaje"
         await interaction.response.send_message(embed=success_embed(f"📢 Canal de anuncios de nivel: {canal_txt}"), ephemeral=True)
 
+    @setup_group.command(name="appeals", description="Configura el canal de revisión de apelaciones")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(canal="Canal donde se publican las apelaciones para revisar")
+    async def setup_appeals(self, interaction: discord.Interaction, canal: Optional[discord.TextChannel] = None):
+        if canal is not None:
+            await update_guild_config(interaction.guild_id, appeals_channel_id=canal.id)
+        config = await get_guild_config(interaction.guild_id)
+        canal_txt = f"<#{config['appeals_channel_id']}>" if config["appeals_channel_id"] else "No configurado"
+        await interaction.response.send_message(embed=success_embed(f"📮 Canal de apelaciones: {canal_txt}"), ephemeral=True)
+
     @setup_group.command(name="automod", description="Activa o desactiva el AutoMod (spam, flood, mayúsculas, ghost ping, publicidad)")
     @app_commands.checks.has_permissions(manage_guild=True)
     @app_commands.describe(activo="Activar o desactivar el AutoMod")
