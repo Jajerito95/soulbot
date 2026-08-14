@@ -44,7 +44,7 @@ class TestCog(commands.Cog):
         embed = build_welcome_embed(interaction.user, template)
         embed.set_footer(text="SoulBot System • Prueba, no cuenta como miembro nuevo")
 
-        await channel.send(embed=embed)
+        await channel.send(content=interaction.user.mention, embed=embed)
         estado = "✅ activado" if config["welcome_enabled"] else "⚠️ desactivado (no se enviaría en un ingreso real)"
         await interaction.response.send_message(
             embed=success_embed(f"Bienvenida de prueba enviada en {channel.mention}.\nEstado del sistema: {estado}"),

@@ -10,7 +10,7 @@ from config import BRAND, COLOR
 
 DEFAULT_WELCOME = (
     "🥳 **¡Un nuevo miembro ha emergido!**\n\n"
-    "👋 ¡Hola {mention}! Bienvenido a **SoulSeeker™ | Oficial**\n\n"
+    "👋 ¡Hola {user}! Bienvenido a **SoulSeeker™ | Oficial**\n\n"
     "Disfruta de tu estadía, pásate por los canales de soporte si necesitas algo "
     "y sé bienvenido a nuestra comunidad.\n\n"
     "👥 **Miembros totales:** `{member_count}`"
@@ -92,7 +92,7 @@ class WelcomeCog(commands.Cog):
 
         template = config["welcome_message"] or DEFAULT_WELCOME
         embed = build_welcome_embed(member, template)
-        await channel.send(embed=embed)
+        await channel.send(content=member.mention, embed=embed)
 
     invites_group = app_commands.Group(name="invites", description="Sistema de invitaciones")
 

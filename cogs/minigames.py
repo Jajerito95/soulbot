@@ -165,12 +165,14 @@ class MinigamesCog(commands.Cog):
 
         self._set_cooldown(interaction.user.id)
         question, options, correct_index = random.choice(TRIVIA_QUESTIONS)
+        config = await db.get_guild_config(interaction.guild_id)
+        reward = config["trivia_reward"]
 
         letters = ["A", "B", "C", "D"]
         options_text = "\n".join(f"**{letters[i]}.** {opt}" for i, opt in enumerate(options))
         embed = base_embed(f"{question}\n\n{options_text}\n\n⏱️ Tienes 15 segundos.", COLOR, title="🧠 Trivia")
 
-        view = TriviaView(correct_index, TRIVIA_REWARD, interaction.user.id)
+        view = TriviaView(correct_index, reward, interaction.user.id)
         await interaction.response.send_message(embed=embed, view=view)
 
 

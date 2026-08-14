@@ -13,9 +13,9 @@ from utils.embeds import success_embed, error_embed, base_embed, get_footer_icon
 from utils.levels_engine import award_xp, level_from_xp, progress_bar, xp_for_level
 from config import COLOR, COLOR_ERROR, RESET_PASSWORD
 
-MESSAGE_COOLDOWN = 60  # segundos
-MESSAGE_XP_RANGE = (15, 25)
-VOICE_XP_PER_MINUTE = 10
+MESSAGE_COOLDOWN = 30  # segundos (valor por defecto, configurable con /setup rates)
+MESSAGE_XP_RANGE = (25, 75)
+VOICE_XP_PER_MINUTE = 50
 
 
 def parse_duration(text: str) -> Optional[str]:
@@ -55,11 +55,12 @@ class LevelsCog(commands.Cog):
             return
         now = time.time()
         last = self.last_message.get(message.author.id, 0)
-        if now - last < MESSAGE_COOLDOWN:
+        cooldown = config["message_xp_cooldown"]
+        if now - last < cooldown:
             return
         self.last_message[message.author.id] = now
 
-        amount = random.randint(*MESSAGE_XP_RANGE)
+        amount = random.randint(config["message_xp_min"], config["message_xp_max"])
         result = await award_xp(message.guild, message.author, amount)
         if result["leveled_up"]:
             await self._announce_levelup(message.guild, message.author, result, message.channel)
@@ -78,7 +79,7 @@ class LevelsCog(commands.Cog):
                         continue
                     if member.voice and (member.voice.self_deaf or member.voice.deaf):
                         continue
-                    result = await award_xp(guild, member, VOICE_XP_PER_MINUTE)
+                    result = await award_xp(guild, member, config["voice_xp_per_minute"])
                     if result["leveled_up"]:
                         await self._announce_levelup(guild, member, result, None)
 
@@ -139,26 +140,25 @@ class LevelsCog(commands.Cog):
             await db.set_card_color(interaction.guild_id, interaction.user.id, color)
 
         saved_color = await db.get_card_color(interaction.guild_id, target.id)
-        from utils.embeds import hex_to_int
-        embed_color = hex_to_int(saved_color) if saved_color else COLOR
 
         data = await db.get_level_data(interaction.guild_id, target.id)
         level, xp_in_level, xp_needed = level_from_xp(data["xp"])
-        bar = progress_bar(xp_in_level, xp_needed)
 
         top = await db.get_leaderboard_alltime(interaction.guild_id, limit=1000)
         position = next((i + 1 for i, row in enumerate(top) if row[0] == target.id), len(top) + 1 if top else 1)
 
-        embed = discord.Embed(color=embed_color)
-        embed.set_author(name=f"🎴 Tarjeta de {target.display_name}")
-        embed.set_thumbnail(url=target.display_avatar.url)
-        embed.add_field(name="⭐ Nivel", value=f"`{level}`", inline=True)
-        embed.add_field(name="🏆 Posición", value=f"`#{position}`", inline=True)
-        embed.add_field(name="✨ XP total", value=f"`{data['xp']}`", inline=True)
-        embed.add_field(name="📈 Progreso", value=f"{bar} `{xp_in_level}/{xp_needed}`", inline=False)
-        embed.set_footer(text="SoulBot System", icon_url=get_footer_icon())
-        embed.timestamp = discord.utils.utcnow()
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.defer()
+        from utils.card_renderer import render_card
+        buffer = await render_card(
+            username=target.name,
+            avatar_url=target.display_avatar.url,
+            level=level,
+            xp_current=xp_in_level,
+            xp_needed=xp_needed,
+            rank=position,
+            accent_hex=saved_color,
+        )
+        await interaction.followup.send(file=discord.File(buffer, filename="card.png"))
 
     @app_commands.command(name="leaderboard", description="Top 10 del servidor por XP")
     @app_commands.describe(periodo="Periodo del ranking")
@@ -181,21 +181,48 @@ class LevelsCog(commands.Cog):
         await self._send_leaderboard(interaction, periodo.value if periodo else "alltime")
 
     async def _send_leaderboard(self, interaction: discord.Interaction, periodo: str):
-        medals = ["🥇", "🥈", "🥉"]
         if periodo == "alltime":
             rows = await db.get_leaderboard_alltime(interaction.guild_id)
-            lines = [f"{medals[i] if i < 3 else f'`#{i+1}`'} <@{r[0]}> — Nivel **{r[2]}** (`{r[1]}` XP)" for i, r in enumerate(rows)]
-            title = "🏆 Leaderboard — All Time"
+            period_label = "All Time"
         else:
             days = 30 if periodo == "monthly" else 1
             rows = await db.get_leaderboard_period(interaction.guild_id, days)
-            lines = [f"{medals[i] if i < 3 else f'`#{i+1}`'} <@{r[0]}> — `{r[1]}` XP" for i, r in enumerate(rows)]
-            title = f"🏆 Leaderboard — {'Mensual' if periodo == 'monthly' else 'Diario'}"
+            period_label = "Mensual" if periodo == "monthly" else "Diario"
 
-        if not lines:
-            lines = ["Todavía no hay datos suficientes."]
+        if not rows:
+            await interaction.response.send_message(embed=error_embed("Todavía no hay datos suficientes."))
+            return
 
-        await interaction.response.send_message(embed=base_embed("\n".join(lines), COLOR, title=title))
+        await interaction.response.defer()
+
+        entries = []
+        for row in rows:
+            user_id = row[0]
+            member = interaction.guild.get_member(user_id)
+            if member is None:
+                try:
+                    member = await interaction.guild.fetch_member(user_id)
+                except discord.NotFound:
+                    continue
+
+            if periodo == "alltime":
+                xp, level = row[1], row[2]
+                _, xp_in_level, xp_needed = level_from_xp(xp)
+                entries.append({
+                    "username": member.name, "avatar_url": member.display_avatar.url,
+                    "stat_text": f"Nivel {level} • {xp} XP", "ratio": xp_in_level / xp_needed if xp_needed else 0,
+                })
+            else:
+                gained = row[1]
+                entries.append({
+                    "username": member.name, "avatar_url": member.display_avatar.url,
+                    "stat_text": f"+{gained} XP", "ratio": None,
+                })
+
+        from utils.card_renderer import render_leaderboard
+        guild_icon = interaction.guild.icon.url if interaction.guild.icon else None
+        buffer = await render_leaderboard(interaction.guild.name, guild_icon, entries, period_label)
+        await interaction.followup.send(file=discord.File(buffer, filename="leaderboard.png"))
 
     @app_commands.command(name="rewards", description="Muestra las recompensas de rol por nivel")
     async def rewards(self, interaction: discord.Interaction):

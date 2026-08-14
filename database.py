@@ -218,6 +218,16 @@ async def init_db():
         "levels_announce_channel_id": "INTEGER",
         "levels_enabled": "INTEGER DEFAULT 1",
         "appeals_channel_id": "INTEGER",
+        "message_xp_min": "INTEGER DEFAULT 25",
+        "message_xp_max": "INTEGER DEFAULT 75",
+        "message_xp_cooldown": "INTEGER DEFAULT 30",
+        "voice_xp_per_minute": "INTEGER DEFAULT 50",
+        "daily_min": "INTEGER DEFAULT 100",
+        "daily_max": "INTEGER DEFAULT 250",
+        "levelup_coin_multiplier": "INTEGER DEFAULT 10",
+        "game_win_reward": "INTEGER DEFAULT 40",
+        "game_draw_reward": "INTEGER DEFAULT 10",
+        "trivia_reward": "INTEGER DEFAULT 50",
     }
     for col, col_type in new_cols.items():
         if col not in existing_cols:

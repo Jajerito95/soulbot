@@ -16,7 +16,7 @@ INTENTS.members = True
 INTENTS.message_content = True
 INTENTS.presences = True
 
-COGS = ["cogs.embed", "cogs.welcome", "cogs.suggestions", "cogs.tickets", "cogs.setup", "cogs.logs", "cogs.test", "cogs.emojiful", "cogs.purge", "cogs.sanction", "cogs.automod", "cogs.levels", "cogs.economy", "cogs.minigames", "cogs.boardgames", "cogs.appeals", "cogs.backups", "cogs.temproles"]
+COGS = ["cogs.embed", "cogs.welcome", "cogs.suggestions", "cogs.tickets", "cogs.setup", "cogs.logs", "cogs.test", "cogs.emojiful", "cogs.purge", "cogs.sanction", "cogs.automod", "cogs.levels", "cogs.economy", "cogs.minigames", "cogs.boardgames", "cogs.appeals", "cogs.backups", "cogs.temproles", "cogs.maintenance"]
 
 
 class SoulBot(commands.Bot):

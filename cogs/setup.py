@@ -240,6 +240,63 @@ class SetupCog(commands.Cog):
         canal_txt = f"<#{config['appeals_channel_id']}>" if config["appeals_channel_id"] else "No configurado"
         await interaction.response.send_message(embed=success_embed(f"📮 Canal de apelaciones: {canal_txt}"), ephemeral=True)
 
+    @setup_group.command(name="rates", description="Ajusta el XP, daily y recompensas de juegos del servidor")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(
+        xp_mensaje_min="XP mínima por mensaje", xp_mensaje_max="XP máxima por mensaje",
+        xp_mensaje_cooldown="Segundos de cooldown entre mensajes que dan XP",
+        xp_voz_minuto="XP por minuto en canal de voz",
+        daily_min="SoulCoins mínimas del /daily", daily_max="SoulCoins máximas del /daily",
+        coins_por_nivel="Multiplicador de SoulCoins al subir de nivel (nivel × esto)",
+        juego_gana="SoulCoins al ganar un juego de mesa", juego_empate="SoulCoins en empate",
+        trivia_recompensa="SoulCoins al acertar la trivia",
+    )
+    async def setup_rates(
+        self, interaction: discord.Interaction,
+        xp_mensaje_min: Optional[int] = None, xp_mensaje_max: Optional[int] = None, xp_mensaje_cooldown: Optional[int] = None,
+        xp_voz_minuto: Optional[int] = None, daily_min: Optional[int] = None, daily_max: Optional[int] = None,
+        coins_por_nivel: Optional[int] = None, juego_gana: Optional[int] = None, juego_empate: Optional[int] = None,
+        trivia_recompensa: Optional[int] = None,
+    ):
+        fields = {}
+        if xp_mensaje_min is not None:
+            fields["message_xp_min"] = xp_mensaje_min
+        if xp_mensaje_max is not None:
+            fields["message_xp_max"] = xp_mensaje_max
+        if xp_mensaje_cooldown is not None:
+            fields["message_xp_cooldown"] = xp_mensaje_cooldown
+        if xp_voz_minuto is not None:
+            fields["voice_xp_per_minute"] = xp_voz_minuto
+        if daily_min is not None:
+            fields["daily_min"] = daily_min
+        if daily_max is not None:
+            fields["daily_max"] = daily_max
+        if coins_por_nivel is not None:
+            fields["levelup_coin_multiplier"] = coins_por_nivel
+        if juego_gana is not None:
+            fields["game_win_reward"] = juego_gana
+        if juego_empate is not None:
+            fields["game_draw_reward"] = juego_empate
+        if trivia_recompensa is not None:
+            fields["trivia_reward"] = trivia_recompensa
+
+        if fields:
+            await update_guild_config(interaction.guild_id, **fields)
+
+        config = await get_guild_config(interaction.guild_id)
+        await interaction.response.send_message(
+            embed=success_embed(
+                f"💬 XP mensaje: **{config['message_xp_min']}-{config['message_xp_max']}** cada **{config['message_xp_cooldown']}s**\n"
+                f"🎙️ XP voz: **{config['voice_xp_per_minute']}**/min\n"
+                f"🎁 Daily: **{config['daily_min']}-{config['daily_max']}** SoulCoins\n"
+                f"⭐ Coins por nivel: **nivel × {config['levelup_coin_multiplier']}**\n"
+                f"🎲 Juegos: gana **{config['game_win_reward']}** / empate **{config['game_draw_reward']}**\n"
+                f"🧠 Trivia: **{config['trivia_reward']}**",
+                title="⚙️ Tasas de XP y economía",
+            ),
+            ephemeral=True,
+        )
+
     @setup_group.command(name="automod", description="Activa o desactiva el AutoMod (spam, flood, mayúsculas, ghost ping, publicidad)")
     @app_commands.checks.has_permissions(manage_guild=True)
     @app_commands.describe(activo="Activar o desactivar el AutoMod")

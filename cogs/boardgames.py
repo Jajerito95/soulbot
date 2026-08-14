@@ -7,12 +7,17 @@ import database as db
 from utils.embeds import success_embed, error_embed, base_embed
 from config import COLOR
 
-WIN_REWARD = 40
-DRAW_REWARD = 10
+WIN_REWARD_DEFAULT = 40
+DRAW_REWARD_DEFAULT = 10
 
 
 async def _reward(guild_id: int, user_id: int, amount: int) -> int:
     return await db.add_coins(guild_id, user_id, amount)
+
+
+async def _get_rewards(guild_id: int) -> tuple[int, int]:
+    config = await db.get_guild_config(guild_id)
+    return config["game_win_reward"], config["game_draw_reward"]
 
 
 def _validate_opponent(interaction: discord.Interaction, opponent: discord.Member):
@@ -83,14 +88,15 @@ class TicTacToeView(discord.ui.View):
         if result:
             for child in self.children:
                 child.disabled = True
+            win_reward, draw_reward = await _get_rewards(interaction.guild_id)
             if result == "draw":
-                await _reward(interaction.guild_id, self.p1.id, DRAW_REWARD)
-                await _reward(interaction.guild_id, self.p2.id, DRAW_REWARD)
-                embed = base_embed(f"Empate entre {self.p1.mention} y {self.p2.mention}.\n💰 +{DRAW_REWARD} SoulCoins para ambos.", COLOR, title="🎲 3 en raya — Empate")
+                await _reward(interaction.guild_id, self.p1.id, draw_reward)
+                await _reward(interaction.guild_id, self.p2.id, draw_reward)
+                embed = base_embed(f"Empate entre {self.p1.mention} y {self.p2.mention}.\n💰 +{draw_reward} SoulCoins para ambos.", COLOR, title="🎲 3 en raya — Empate")
             else:
                 winner = self.p1 if symbol == self._symbol(self.p1) else self.p2
-                new_balance = await _reward(interaction.guild_id, winner.id, WIN_REWARD)
-                embed = success_embed(f"🏆 ¡Gana {winner.mention}!\n💰 +{WIN_REWARD} SoulCoins (saldo: {new_balance})", title="🎲 3 en raya")
+                new_balance = await _reward(interaction.guild_id, winner.id, win_reward)
+                embed = success_embed(f"🏆 ¡Gana {winner.mention}!\n💰 +{win_reward} SoulCoins (saldo: {new_balance})", title="🎲 3 en raya")
             self.stop()
         else:
             self.turn = self.p2 if self.turn.id == self.p1.id else self.p1
@@ -179,21 +185,23 @@ class ConnectFourView(discord.ui.View):
             await interaction.response.send_message(embed=error_embed("Esa columna ya está llena."), ephemeral=True)
             return
 
+        win_reward, draw_reward = await _get_rewards(interaction.guild_id)
+
         if self._check_winner(disc):
             for child in self.children:
                 child.disabled = True
-            new_balance = await _reward(interaction.guild_id, self.turn.id, WIN_REWARD)
+            new_balance = await _reward(interaction.guild_id, self.turn.id, win_reward)
             embed = success_embed(
-                f"{self._render()}\n\n🏆 ¡Gana {self.turn.mention}!\n💰 +{WIN_REWARD} SoulCoins (saldo: {new_balance})",
+                f"{self._render()}\n\n🏆 ¡Gana {self.turn.mention}!\n💰 +{win_reward} SoulCoins (saldo: {new_balance})",
                 title="🔴🟡 4 en raya",
             )
             self.stop()
         elif all(self.board[0][c] != DISC_EMPTY for c in range(COLS)):
             for child in self.children:
                 child.disabled = True
-            await _reward(interaction.guild_id, self.p1.id, DRAW_REWARD)
-            await _reward(interaction.guild_id, self.p2.id, DRAW_REWARD)
-            embed = base_embed(f"{self._render()}\n\nEmpate. 💰 +{DRAW_REWARD} SoulCoins para ambos.", COLOR, title="🔴🟡 4 en raya — Empate")
+            await _reward(interaction.guild_id, self.p1.id, draw_reward)
+            await _reward(interaction.guild_id, self.p2.id, draw_reward)
+            embed = base_embed(f"{self._render()}\n\nEmpate. 💰 +{draw_reward} SoulCoins para ambos.", COLOR, title="🔴🟡 4 en raya — Empate")
             self.stop()
         else:
             self.turn = self.p2 if self.turn.id == self.p1.id else self.p1
@@ -242,15 +250,16 @@ class RPSView(discord.ui.View):
             child.disabled = True
 
         result_line = f"{self.p1.mention}: {RPS_EMOJI[c1]} {c1}\n{self.p2.mention}: {RPS_EMOJI[c2]} {c2}"
+        win_reward, draw_reward = await _get_rewards(interaction.guild_id)
 
         if c1 == c2:
-            await _reward(interaction.guild_id, self.p1.id, DRAW_REWARD)
-            await _reward(interaction.guild_id, self.p2.id, DRAW_REWARD)
-            embed = base_embed(f"{result_line}\n\nEmpate. 💰 +{DRAW_REWARD} SoulCoins para ambos.", COLOR, title="✊ Piedra, papel o tijera")
+            await _reward(interaction.guild_id, self.p1.id, draw_reward)
+            await _reward(interaction.guild_id, self.p2.id, draw_reward)
+            embed = base_embed(f"{result_line}\n\nEmpate. 💰 +{draw_reward} SoulCoins para ambos.", COLOR, title="✊ Piedra, papel o tijera")
         else:
             winner = self.p1 if RPS_BEATS[c1] == c2 else self.p2
-            new_balance = await _reward(interaction.guild_id, winner.id, WIN_REWARD)
-            embed = success_embed(f"{result_line}\n\n🏆 ¡Gana {winner.mention}!\n💰 +{WIN_REWARD} SoulCoins (saldo: {new_balance})", title="✊ Piedra, papel o tijera")
+            new_balance = await _reward(interaction.guild_id, winner.id, win_reward)
+            embed = success_embed(f"{result_line}\n\n🏆 ¡Gana {winner.mention}!\n💰 +{win_reward} SoulCoins (saldo: {new_balance})", title="✊ Piedra, papel o tijera")
 
         await interaction.message.edit(embed=embed, view=self)
         self.stop()

@@ -47,7 +47,8 @@ class EconomyCog(commands.Cog):
                 return
 
         import random
-        amount = random.randint(DAILY_MIN, DAILY_MAX)
+        config = await db.get_guild_config(interaction.guild_id)
+        amount = random.randint(config["daily_min"], config["daily_max"])
         new_balance = await db.add_coins(interaction.guild_id, interaction.user.id, amount)
         await db.set_last_daily(interaction.guild_id, interaction.user.id, now.isoformat())
 

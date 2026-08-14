@@ -79,7 +79,8 @@ async def award_xp(guild: discord.Guild, member: discord.Member, base_amount: in
     new_roles = []
     coins_awarded = 0
     if leveled_up:
-        coins_awarded = new_level * 10
+        config = await db.get_guild_config(guild.id)
+        coins_awarded = new_level * config["levelup_coin_multiplier"]
         await db.add_coins(guild.id, member.id, coins_awarded)
 
         rewards = await db.get_level_rewards(guild.id)

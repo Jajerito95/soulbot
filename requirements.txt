@@ -4,3 +4,4 @@ aiosqlite==0.20.0
 libsql
 python-dotenv==1.0.1
 Flask==3.0.3
+Pillow>=10.0.0
