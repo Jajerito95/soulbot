@@ -24,7 +24,8 @@ def build_welcome_embed(member: discord.Member, template: str) -> discord.Embed:
         member_count=member.guild.member_count,
     )
     embed = discord.Embed(description=text, color=COLOR)
-    embed.set_author(name=f"👋 ¡Bienvenido al servidor, {member.display_name}!")
+    from utils.emojis import emoji
+    embed.set_author(name=f"{emoji(member.guild, 'wave')} ¡Bienvenido al servidor, {member.display_name}!")
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.add_field(name="🆔 Usuario", value=member.mention, inline=True)
     embed.add_field(name="👥 Miembros totales", value=f"`{member.guild.member_count}`", inline=True)

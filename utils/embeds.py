@@ -26,15 +26,21 @@ def base_embed(description: str, color: int = COLOR, title: Optional[str] = None
     return embed
 
 
-def success_embed(description: str, title: Optional[str] = "✅ Listo") -> discord.Embed:
+def success_embed(description: str, title: Optional[str] = None, guild: Optional[discord.Guild] = None) -> discord.Embed:
+    from utils.emojis import emoji
+    title = title or f"{emoji(guild, 'success')} Listo"
     return base_embed(description, COLOR_SUCCESS, title)
 
 
-def error_embed(description: str, title: Optional[str] = "❌ Error") -> discord.Embed:
+def error_embed(description: str, title: Optional[str] = None, guild: Optional[discord.Guild] = None) -> discord.Embed:
+    from utils.emojis import emoji
+    title = title or f"{emoji(guild, 'error')} Error"
     return base_embed(description, COLOR_ERROR, title)
 
 
-def warning_embed(description: str, title: Optional[str] = "⚠️ Aviso") -> discord.Embed:
+def warning_embed(description: str, title: Optional[str] = None, guild: Optional[discord.Guild] = None) -> discord.Embed:
+    from utils.emojis import emoji
+    title = title or f"{emoji(guild, 'warning')} Aviso"
     return base_embed(description, COLOR_WARNING, title)
 
 

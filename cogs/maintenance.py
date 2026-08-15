@@ -6,6 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils.embeds import success_embed, error_embed
+from utils.maintenance_state import set_maintenance
 
 
 class MaintenanceCog(commands.Cog):
@@ -38,11 +39,13 @@ class MaintenanceCog(commands.Cog):
 
         self.enabled = True
         self.reason = razon
+        set_maintenance(True)
         await self.bot.change_presence(status=discord.Status.invisible)
 
         await interaction.response.send_message(
             embed=success_embed(
-                f"🔧 Modo mantenimiento **activado**.\nEl bot aparece desconectado y ningún comando funcionará excepto para ti."
+                f"🔧 Modo mantenimiento **activado**.\nEl bot aparece desconectado, ningún comando funcionará excepto para ti, "
+                f"y se pausan el AutoMod y la ganancia de XP/voz."
                 + (f"\n📝 Motivo: {razon}" if razon else ""),
             ),
             ephemeral=True,

@@ -8,6 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils.embeds import success_embed, error_embed, base_embed
+from utils.emojis import clear_cache
 from config import COLOR
 
 EMOJI_RE = re.compile(r"<(a?):(\w{2,32}):(\d+)>")
@@ -63,6 +64,7 @@ class EmojifulCog(commands.Cog):
         except discord.HTTPException as e:
             await interaction.followup.send(embed=error_embed(f"Discord rechazó el emoji: {e.text}"))
             return
+        clear_cache(interaction.guild_id)
 
         await interaction.followup.send(embed=success_embed(f"{emoji} añadido como `:{emoji.name}:`", title="✨ Emoji creado"))
 
@@ -101,6 +103,7 @@ class EmojifulCog(commands.Cog):
         except discord.HTTPException as e:
             await interaction.followup.send(embed=error_embed(f"Discord rechazó el emoji: {e.text}"))
             return
+        clear_cache(interaction.guild_id)
 
         await interaction.followup.send(
             embed=success_embed(f"{new_emoji} copiado como `:{new_emoji.name}:`", title="✨ Emoji robado")
@@ -118,6 +121,7 @@ class EmojifulCog(commands.Cog):
             return
 
         await target.delete()
+        clear_cache(interaction.guild_id)
         await interaction.response.send_message(embed=success_embed(f"Emoji `:{nombre}:` eliminado."))
 
     @emoji_group.command(name="rename", description="Renombra un emoji existente")
@@ -139,6 +143,7 @@ class EmojifulCog(commands.Cog):
             return
 
         await target.edit(name=nombre_nuevo)
+        clear_cache(interaction.guild_id)
         await interaction.response.send_message(embed=success_embed(f"Renombrado a `:{nombre_nuevo}:` {target}"))
 
     @emoji_group.command(name="list", description="Lista todos los emojis del servidor")

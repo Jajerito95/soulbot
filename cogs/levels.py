@@ -96,13 +96,14 @@ class LevelsCog(commands.Cog):
         if not channel:
             return
 
-        desc = f"🎉 {member.mention} ha subido a **nivel {result['new_level']}**!"
+        from utils.emojis import emoji
+        desc = f"{emoji(guild, 'levelup')} {member.mention} ha subido a **nivel {result['new_level']}**!"
         if result.get("coins_awarded"):
-            desc += f"\n💰 +{result['coins_awarded']} SoulCoins"
+            desc += f"\n{emoji(guild, 'coin')} +{result['coins_awarded']} SoulCoins"
         if result["new_roles"]:
             desc += "\n🎁 Nuevo rol: " + ", ".join(r.mention for r in result["new_roles"])
         try:
-            await channel.send(embed=success_embed(desc, title="⭐ ¡Level Up!"))
+            await channel.send(embed=success_embed(desc, title=f"{emoji(guild, 'star')} ¡Level Up!", guild=guild))
         except discord.Forbidden:
             pass
 

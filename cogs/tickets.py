@@ -146,11 +146,12 @@ async def _create_ticket_channel(guild: discord.Guild, member: discord.Member, c
 
     await db.create_ticket(guild.id, channel.id, member.id, category)
 
+    from utils.emojis import emoji
     embed = base_embed(
-        f"👋 Hola {member.mention}, gracias por abrir un ticket.\n📂 Categoría: **{category}**\n\n"
+        f"{emoji(guild, 'wave')} Hola {member.mention}, gracias por abrir un ticket.\n📂 Categoría: **{category}**\n\n"
         "Un miembro del Staff te atenderá en breve. Mientras tanto, cuéntanos con detalle tu caso.",
         COLOR,
-        title="🎫 Ticket abierto",
+        title=f"{emoji(guild, 'ticket')} Ticket abierto",
     )
     mention = staff_role.mention if staff_role else ""
     await channel.send(content=f"{member.mention} {mention}".strip(), embed=embed, view=TicketControlView())
