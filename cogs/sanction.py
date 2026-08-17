@@ -61,122 +61,6 @@ class SanctionCog(commands.Cog):
         default_permissions=discord.Permissions(moderate_members=True),
     )
 
-    @sanction_group.command(name="warn", description="Advierte a un usuario")
-    @app_commands.checks.has_permissions(moderate_members=True)
-    @app_commands.describe(usuario="Usuario a advertir", razon="Motivo del warn", evidencia="Link de Imgur (opcional)")
-    async def sanction_warn(
-        self, interaction: discord.Interaction, usuario: discord.Member, razon: str, evidencia: Optional[str] = None
-    ):
-        if evidencia and not is_imgur(evidencia):
-            await interaction.response.send_message(
-                embed=error_embed("La evidencia debe ser un link de Imgur (imgur.com)."), ephemeral=True
-            )
-            return
-
-        sanction_id = await log_staff_action(interaction.guild_id, usuario.id, interaction.user.id, "warn", razon, evidencia)
-
-        try:
-            await usuario.send(
-                embed=base_embed(
-                    f"⚠️ Has recibido un **warn** en **{interaction.guild.name}**.\n📝 Razón: {razon}",
-                    COLOR_ERROR,
-                    title="⚠️ Advertencia",
-                )
-            )
-        except discord.Forbidden:
-            pass
-
-        await interaction.response.send_message(
-            embed=success_embed(f"{usuario.mention} advertido. ID de sanción: `#{sanction_id}`")
-        )
-        desc = f"👤 Usuario: {usuario.mention}\n🛡️ Staff: {interaction.user.mention}\n📝 Razón: {razon}\n🆔 ID: `#{sanction_id}`"
-        if evidencia:
-            desc += f"\n🔗 Evidencia: {evidencia}"
-        await _send_log(interaction.guild, "⚠️ Warn aplicado", desc)
-
-    @sanction_group.command(name="ban", description="Banea a un usuario (evidencia de Imgur obligatoria)")
-    @app_commands.checks.has_permissions(ban_members=True)
-    @app_commands.describe(
-        usuario="Usuario a banear", razon="Motivo del ban", evidencia="Link de Imgur (OBLIGATORIO)",
-        borrar_mensajes="Días de mensajes a borrar (0-7, opcional)",
-    )
-    async def sanction_ban(
-        self,
-        interaction: discord.Interaction,
-        usuario: discord.Member,
-        razon: str,
-        evidencia: str,
-        borrar_mensajes: app_commands.Range[int, 0, 7] = 0,
-    ):
-        if not is_imgur(evidencia):
-            await interaction.response.send_message(
-                embed=error_embed("El ban requiere evidencia en formato Imgur (imgur.com). Sube la captura ahí primero."),
-                ephemeral=True,
-            )
-            return
-
-        await interaction.response.defer()
-
-        try:
-            await usuario.send(
-                embed=base_embed(
-                    f"🔨 Has sido **baneado** de **{interaction.guild.name}**.\n📝 Razón: {razon}",
-                    COLOR_ERROR,
-                    title="🔨 Ban",
-                )
-            )
-        except discord.Forbidden:
-            pass
-
-        try:
-            await interaction.guild.ban(usuario, reason=razon, delete_message_days=borrar_mensajes)
-        except discord.Forbidden:
-            await interaction.followup.send(embed=error_embed("No tengo permiso para banear a ese usuario."))
-            return
-
-        sanction_id = await log_staff_action(interaction.guild_id, usuario.id, interaction.user.id, "ban", razon, evidencia)
-
-        await interaction.followup.send(
-            embed=success_embed(f"{usuario.mention} baneado. ID de sanción: `#{sanction_id}`")
-        )
-        await _send_log(
-            interaction.guild,
-            "🔨 Ban aplicado",
-            f"👤 Usuario: {usuario.mention} (`{usuario.id}`)\n🛡️ Staff: {interaction.user.mention}\n"
-            f"📝 Razón: {razon}\n🆔 ID: `#{sanction_id}`\n🔗 Evidencia: {evidencia}",
-        )
-
-    @sanction_group.command(name="unban", description="Desbanea a un usuario por su ID")
-    @app_commands.checks.has_permissions(ban_members=True)
-    @app_commands.describe(usuario_id="ID del usuario baneado", razon="Motivo del unban")
-    async def sanction_unban(self, interaction: discord.Interaction, usuario_id: str, razon: str):
-        if not usuario_id.isdigit():
-            await interaction.response.send_message(embed=error_embed("El ID debe ser numérico."), ephemeral=True)
-            return
-
-        user = discord.Object(id=int(usuario_id))
-        try:
-            await interaction.guild.unban(user, reason=razon)
-        except discord.NotFound:
-            await interaction.response.send_message(embed=error_embed("Ese usuario no está baneado."), ephemeral=True)
-            return
-        except discord.Forbidden:
-            await interaction.response.send_message(
-                embed=error_embed("No tengo permiso para desbanear."), ephemeral=True
-            )
-            return
-
-        sanction_id = await log_staff_action(interaction.guild_id, int(usuario_id), interaction.user.id, "unban", razon)
-
-        await interaction.response.send_message(
-            embed=success_embed(f"Usuario `{usuario_id}` desbaneado. ID de sanción: `#{sanction_id}`")
-        )
-        await _send_log(
-            interaction.guild,
-            "🔓 Unban aplicado",
-            f"👤 Usuario: `{usuario_id}`\n🛡️ Staff: {interaction.user.mention}\n📝 Razón: {razon}\n🆔 ID: `#{sanction_id}`",
-        )
-
     @sanction_group.command(name="auto", description="Aplica la sanción correcta automáticamente según el catálogo e historial")
     @app_commands.checks.has_permissions(moderate_members=True)
     @app_commands.describe(usuario="Usuario a sancionar", infraccion="Tipo de infracción", razon="Detalle del caso", evidencia="Link de Imgur")
@@ -227,6 +111,37 @@ class SanctionCog(commands.Cog):
         current = current.lower()
         matches = [c for c in infraction_choices() if current in c[1].lower()]
         return [app_commands.Choice(name=label, value=key) for key, label in matches[:25]]
+
+    @sanction_group.command(name="autoremove", description="Anula una sanción aplicada por error (revierte la reincidencia y desbanea si aplica)")
+    @app_commands.checks.has_permissions(moderate_members=True)
+    @app_commands.describe(sancion_id="ID de la sanción a anular")
+    async def sanction_autoremove(self, interaction: discord.Interaction, sancion_id: int):
+        sanction = await db.get_sanction_by_id(interaction.guild_id, sancion_id)
+        if not sanction:
+            await interaction.response.send_message(embed=error_embed("No existe ninguna sanción con ese ID."), ephemeral=True)
+            return
+
+        await interaction.response.defer()
+
+        if sanction["infraction_key"]:
+            await db.decrement_infraction_count(interaction.guild_id, sanction["target_id"], sanction["infraction_key"])
+
+        if sanction["action"] == "ban":
+            try:
+                await interaction.guild.unban(discord.Object(id=sanction["target_id"]), reason=f"Sanción #{sancion_id} anulada por {interaction.user}")
+            except (discord.NotFound, discord.Forbidden):
+                pass
+            await db.remove_temp_ban(interaction.guild_id, sanction["target_id"])
+
+        await db.delete_staff_action(sancion_id)
+
+        await interaction.followup.send(
+            embed=success_embed(f"Sanción `#{sancion_id}` anulada. Se revirtió la reincidencia" + (" y se desbaneó al usuario." if sanction["action"] == "ban" else "."))
+        )
+        await _send_log(
+            interaction.guild, "🗑️ Sanción anulada",
+            f"🆔 ID: `#{sancion_id}`\n👤 Usuario: <@{sanction['target_id']}>\n🛡️ Anulada por: {interaction.user.mention}",
+        )
 
     @sanction_group.command(name="info", description="Muestra el historial de sanciones de un usuario")
     @app_commands.checks.has_permissions(moderate_members=True)

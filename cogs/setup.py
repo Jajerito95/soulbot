@@ -297,25 +297,176 @@ class SetupCog(commands.Cog):
             ephemeral=True,
         )
 
-    @setup_group.command(name="automod", description="Activa o desactiva el AutoMod (spam, flood, mayúsculas, ghost ping, publicidad)")
+    @setup_group.command(name="automod", description="Configura el AutoMod: activar/desactivar general, por función, y el umbral de avisos")
     @app_commands.checks.has_permissions(manage_guild=True)
-    @app_commands.describe(activo="Activar o desactivar el AutoMod")
-    async def setup_automod(self, interaction: discord.Interaction, activo: Optional[bool] = None):
+    @app_commands.describe(
+        activo="Interruptor general del AutoMod",
+        spam="Detectar mensajes repetidos",
+        flood="Detectar ráfagas de mensajes",
+        mayusculas="Detectar uso excesivo de mayúsculas",
+        ghost_ping="Detectar menciones borradas rápido",
+        publicidad="Detectar enlaces de invitación",
+        avisos_antes_de_sancionar="Cuántos avisos por DM antes de aplicar la sanción real (por defecto 2)",
+    )
+    async def setup_automod(
+        self, interaction: discord.Interaction,
+        activo: Optional[bool] = None, spam: Optional[bool] = None, flood: Optional[bool] = None,
+        mayusculas: Optional[bool] = None, ghost_ping: Optional[bool] = None, publicidad: Optional[bool] = None,
+        avisos_antes_de_sancionar: Optional[int] = None,
+    ):
+        fields = {}
         if activo is not None:
-            await update_guild_config(interaction.guild_id, automod_enabled=int(activo))
+            fields["automod_enabled"] = int(activo)
+        if spam is not None:
+            fields["automod_spam"] = int(spam)
+        if flood is not None:
+            fields["automod_flood"] = int(flood)
+        if mayusculas is not None:
+            fields["automod_caps"] = int(mayusculas)
+        if ghost_ping is not None:
+            fields["automod_ghostping"] = int(ghost_ping)
+        if publicidad is not None:
+            fields["automod_ads"] = int(publicidad)
+        if avisos_antes_de_sancionar is not None:
+            fields["automod_warn_threshold"] = max(0, avisos_antes_de_sancionar)
+
+        if fields:
+            await update_guild_config(interaction.guild_id, **fields)
 
         config = await get_guild_config(interaction.guild_id)
-        estado = "✅ Activado" if config["automod_enabled"] else "❌ Desactivado"
+
+        def flag(v):
+            return "✅" if v else "❌"
+
         await interaction.response.send_message(
             embed=success_embed(
-                f"Estado: {estado}\n\n"
-                "Detecta automáticamente: Spam, Flood, Mayúsculas excesivas, Ghost Ping y Publicidad (invites), "
-                "aplicando la sanción del catálogo según reincidencia.\n"
-                "⚠️ El Staff (permiso `moderate_members`) está exento.",
+                f"🔌 General: {flag(config['automod_enabled'])}\n"
+                f"💬 Spam: {flag(config['automod_spam'])}\n"
+                f"🌊 Flood: {flag(config['automod_flood'])}\n"
+                f"🔠 Mayúsculas: {flag(config['automod_caps'])}\n"
+                f"👻 Ghost Ping: {flag(config['automod_ghostping'])}\n"
+                f"📢 Publicidad: {flag(config['automod_ads'])}\n"
+                f"⚠️ Avisos antes de sancionar: **{config['automod_warn_threshold']}**\n\n"
+                "El Staff (permiso `moderate_members`) siempre está exento.",
                 title="🤖 AutoMod",
             ),
             ephemeral=True,
         )
+
+    @setup_group.command(name="test", description="Ejecuta una batería de pruebas de todos los sistemas configurados")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(canal="Canal donde se enviará el reporte de pruebas")
+    async def setup_test(self, interaction: discord.Interaction, canal: discord.TextChannel):
+        await interaction.response.defer(ephemeral=True)
+        results = []
+
+        def ok(label): results.append(f"✅ {label}")
+        def fail(label, detail=""): results.append(f"❌ {label}" + (f" — {detail}" if detail else ""))
+        def warn(label, detail=""): results.append(f"⚠️ {label}" + (f" — {detail}" if detail else ""))
+
+        # --- Permisos en el canal de destino ---
+        perms = canal.permissions_for(interaction.guild.me)
+        if perms.send_messages and perms.embed_links and perms.attach_files:
+            ok("Permisos del bot en el canal de test")
+        else:
+            fail("Permisos del bot en el canal de test", "faltan send_messages/embed_links/attach_files")
+
+        # --- Base de datos ---
+        try:
+            test_cfg = await get_guild_config(interaction.guild_id)
+            db_mode = "Turso (nube, persistente)" if __import__("database").USING_TURSO else "SQLite local (⚠️ no persiste en Render Free)"
+            ok(f"Base de datos accesible — {db_mode}")
+        except Exception as e:
+            fail("Base de datos accesible", str(e))
+
+        # --- Canales configurados ---
+        channel_checks = [
+            ("welcome_channel_id", "Canal de bienvenida"),
+            ("suggestion_channel_id", "Canal de sugerencias"),
+            ("logs_channel_id", "Canal de logs"),
+            ("tickets_panel_channel_id", "Canal del panel de tickets"),
+            ("tickets_log_channel_id", "Canal de logs de tickets"),
+            ("appeals_channel_id", "Canal de apelaciones"),
+            ("levels_announce_channel_id", "Canal de anuncios de nivel"),
+        ]
+        for key, label in channel_checks:
+            cid = test_cfg.get(key)
+            if not cid:
+                warn(label, "no configurado")
+                continue
+            ch = interaction.guild.get_channel(cid)
+            ok(label) if ch else fail(label, f"el canal `{cid}` ya no existe")
+
+        # --- Rol de Staff de tickets ---
+        if test_cfg.get("tickets_staff_role_id"):
+            role = interaction.guild.get_role(test_cfg["tickets_staff_role_id"])
+            ok("Rol de Staff de tickets") if role else fail("Rol de Staff de tickets", "el rol ya no existe")
+
+        # --- Categoría de tickets ---
+        if test_cfg.get("tickets_category_id"):
+            cat = interaction.guild.get_channel(test_cfg["tickets_category_id"])
+            ok("Categoría de tickets") if isinstance(cat, discord.CategoryChannel) else fail("Categoría de tickets", "no es una categoría válida")
+
+        # --- AutoMod ---
+        if test_cfg.get("automod_enabled"):
+            activos = [n for n, c in [("spam", "automod_spam"), ("flood", "automod_flood"), ("mayúsculas", "automod_caps"), ("ghost ping", "automod_ghostping"), ("publicidad", "automod_ads")] if test_cfg.get(c)]
+            ok(f"AutoMod activo ({', '.join(activos) if activos else 'sin funciones activas'})")
+        else:
+            warn("AutoMod", "desactivado")
+
+        # --- Sistema de niveles ---
+        ok("Sistema de niveles activo") if test_cfg.get("levels_enabled") else warn("Sistema de niveles", "pausado")
+
+        # --- Render de /card (imagen real) ---
+        try:
+            from utils.card_renderer import render_card
+            from utils.levels_engine import level_from_xp
+            level, xp_in, xp_needed = level_from_xp(500)
+            buffer = await render_card(interaction.user.name, interaction.user.display_avatar.url, level, xp_in, xp_needed, 1)
+            await canal.send(content="🧪 Test de `/card`:", file=discord.File(buffer, filename="test_card.png"))
+            ok("Renderizado de /card")
+        except Exception as e:
+            fail("Renderizado de /card", str(e))
+
+        # --- Render de /leaderboard (imagen real) ---
+        try:
+            from utils.card_renderer import render_leaderboard
+            entries = [{"username": interaction.user.name, "avatar_url": interaction.user.display_avatar.url, "stat_text": "Nivel 5 • 500 XP", "ratio": 0.5}]
+            guild_icon = interaction.guild.icon.url if interaction.guild.icon else None
+            buffer = await render_leaderboard(interaction.guild.name, guild_icon, entries, "Test")
+            await canal.send(content="🧪 Test de `/leaderboard`:", file=discord.File(buffer, filename="test_lb.png"))
+            ok("Renderizado de /leaderboard")
+        except Exception as e:
+            fail("Renderizado de /leaderboard", str(e))
+
+        # --- Transcript de tickets ---
+        try:
+            from utils.transcripts import generate_transcript
+            path = await generate_transcript(canal)
+            ok("Generación de transcripts")
+        except Exception as e:
+            fail("Generación de transcripts", str(e))
+
+        # --- Emojis custom ---
+        from utils.emojis import FALLBACKS
+        custom_found = [n for n in FALLBACKS if discord.utils.get(interaction.guild.emojis, name=n)]
+        if custom_found:
+            ok(f"Emojis custom detectados ({len(custom_found)}/{len(FALLBACKS)}): {', '.join(custom_found[:10])}" + ("..." if len(custom_found) > 10 else ""))
+        else:
+            warn("Emojis custom", "ninguno subido todavía, usando Unicode de respaldo")
+
+        # --- Resumen final ---
+        passed = sum(1 for r in results if r.startswith("✅"))
+        warned = sum(1 for r in results if r.startswith("⚠️"))
+        failed = sum(1 for r in results if r.startswith("❌"))
+
+        chunks = ["\n".join(results[i:i + 15]) for i in range(0, len(results), 15)]
+        for i, chunk in enumerate(chunks):
+            embed = success_embed(chunk, title=f"🧪 Test de sistemas ({i+1}/{len(chunks)})")
+            await canal.send(embed=embed)
+
+        await canal.send(embed=success_embed(f"✅ {passed} OK · ⚠️ {warned} avisos · ❌ {failed} fallos", title="🧪 Resumen del test"))
+        await interaction.followup.send(embed=success_embed(f"Test completado en {canal.mention} — {passed} OK, {warned} avisos, {failed} fallos."), ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

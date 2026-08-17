@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Optional
+import re
 
 import discord
 from discord import app_commands
@@ -152,6 +153,85 @@ class AppealReviewView(discord.ui.View):
         await self._resolve(interaction, "denied")
 
 
+# ---------- botón de apelación directo en el DM de sanción ----------
+
+class AppealModal(discord.ui.Modal, title="Apelar sanción"):
+    reason_input = discord.ui.TextInput(
+        label="¿Por qué crees que fue injusta?", style=discord.TextStyle.paragraph, max_length=1000
+    )
+    evidence_input = discord.ui.TextInput(label="Evidencia (link de Imgur, opcional)", required=False)
+
+    def __init__(self, guild_id: int, sanction_id: int):
+        super().__init__()
+        self.guild_id = guild_id
+        self.sanction_id = sanction_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        evidencia = self.evidence_input.value or None
+        if evidencia and not is_imgur(evidencia):
+            await interaction.response.send_message(embed=error_embed("La evidencia debe ser un link de Imgur (imgur.com)."), ephemeral=True)
+            return
+
+        sanction = await db.get_sanction_by_id(self.guild_id, self.sanction_id)
+        if not sanction:
+            await interaction.response.send_message(embed=error_embed("Esa sanción ya no existe."), ephemeral=True)
+            return
+        if sanction["target_id"] != interaction.user.id:
+            await interaction.response.send_message(embed=error_embed("Esta sanción no te pertenece."), ephemeral=True)
+            return
+
+        existing = await db.get_pending_appeal_for_sanction(self.guild_id, self.sanction_id)
+        if existing:
+            await interaction.response.send_message(embed=error_embed(f"Ya tienes una apelación pendiente (`#{existing['id']}`)."), ephemeral=True)
+            return
+
+        appeal_id = await db.create_appeal(self.guild_id, self.sanction_id, interaction.user.id, self.reason_input.value, evidencia)
+        appeal = await db.get_appeal(appeal_id)
+
+        await interaction.response.send_message(embed=success_embed(f"📮 Apelación enviada. ID: `#{appeal_id}`. El Staff la revisará pronto."), ephemeral=True)
+
+        guild = interaction.client.get_guild(self.guild_id)
+        if guild:
+            config = await db.get_guild_config(self.guild_id)
+            if config["appeals_channel_id"]:
+                channel = guild.get_channel(config["appeals_channel_id"])
+                if channel:
+                    embed = build_appeal_embed(appeal, sanction, interaction.user)
+                    await channel.send(embed=embed, view=AppealReviewView())
+
+
+class AppealButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"soulbot:appeal_start:(?P<guild_id>\d+):(?P<sanction_id>\d+)",
+):
+    def __init__(self, guild_id: int, sanction_id: int):
+        super().__init__(
+            discord.ui.Button(
+                label="¿Fue injusto? Apela aquí",
+                emoji="📮",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"soulbot:appeal_start:{guild_id}:{sanction_id}",
+            )
+        )
+        self.guild_id = guild_id
+        self.sanction_id = sanction_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str]):
+        return cls(int(match["guild_id"]), int(match["sanction_id"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(AppealModal(self.guild_id, self.sanction_id))
+
+
+class AppealPromptView(discord.ui.View):
+    """Vista adjunta al DM de sanción, con el botón para apelar directamente."""
+    def __init__(self, guild_id: int, sanction_id: int):
+        super().__init__(timeout=None)
+        self.add_item(AppealButton(guild_id, sanction_id))
+
+
 async def setup(bot: commands.Bot):
     bot.add_view(AppealReviewView())
+    bot.add_dynamic_items(AppealButton)
     await bot.add_cog(AppealsCog(bot))

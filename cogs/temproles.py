@@ -13,14 +13,20 @@ from config import COLOR
 MAX_DAYS = 90  # 3 meses
 
 
-def parse_duration(text: str) -> Optional[tuple[str, int]]:
+MAX_SECONDS = 365 * 24 * 3600  # 1 año
+
+
+def parse_duration(text: str) -> Optional[tuple[str, str]]:
     """
-    Convierte '7d', '2w', '1mo', '3mo' en (timestamp ISO futuro, días totales).
-    None si el formato es inválido o supera los 3 meses.
+    Convierte '30s', '10m', '2h', '7d', '2w', '1mo', '1y' en (timestamp ISO futuro, texto legible).
+    None si el formato es inválido o supera 1 año.
+    Unidades: s=segundo, m=minuto, h=hora, d=día, w=semana, mo=mes(30d), y=año(365d)
     """
     text = text.strip().lower()
-    unit = "mo" if text.endswith("mo") else text[-1]
-    amount_str = text[:-2] if unit == "mo" else text[:-1]
+    if text.endswith("mo"):
+        unit, amount_str = "mo", text[:-2]
+    else:
+        unit, amount_str = text[-1], text[:-1]
 
     try:
         amount = int(amount_str)
@@ -29,16 +35,19 @@ def parse_duration(text: str) -> Optional[tuple[str, int]]:
     if amount <= 0:
         return None
 
-    days_map = {"d": 1, "w": 7, "mo": 30}
-    if unit not in days_map:
+    seconds_map = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800, "mo": 2592000, "y": 31536000}
+    if unit not in seconds_map:
         return None
 
-    total_days = amount * days_map[unit]
-    if total_days > MAX_DAYS:
+    total_seconds = amount * seconds_map[unit]
+    if total_seconds > MAX_SECONDS:
         return None
 
-    expires_at = (datetime.datetime.utcnow() + datetime.timedelta(days=total_days)).isoformat()
-    return expires_at, total_days
+    unit_names = {"s": "segundo(s)", "m": "minuto(s)", "h": "hora(s)", "d": "día(s)", "w": "semana(s)", "mo": "mes(es)", "y": "año(s)"}
+    human = f"{amount} {unit_names[unit]}"
+
+    expires_at = (datetime.datetime.utcnow() + datetime.timedelta(seconds=total_seconds)).isoformat()
+    return expires_at, human
 
 
 class TempRolesCog(commands.Cog):
@@ -73,28 +82,28 @@ class TempRolesCog(commands.Cog):
         default_permissions=discord.Permissions(manage_roles=True),
     )
 
-    @role_group.command(name="temp", description="Asigna un rol temporal (máx. 3 meses)")
+    @role_group.command(name="temp", description="Asigna un rol temporal (máx. 1 año)")
     @app_commands.describe(
         usuario="Usuario que recibe el rol",
         rol="Rol a asignar",
-        duracion="Duración: 7d, 2w, 1mo... (máx. 3mo)",
+        duracion="Duración: 30s, 10m, 2h, 7d, 2w, 1mo, 1y (máx. 1 año)",
     )
     async def temp(self, interaction: discord.Interaction, usuario: discord.Member, rol: discord.Role, duracion: str):
         parsed = parse_duration(duracion)
         if not parsed:
             await interaction.response.send_message(
-                embed=error_embed("Duración inválida. Usa formatos como `7d`, `2w`, `1mo` (máximo `3mo`, 90 días)."),
+                embed=error_embed("Duración inválida. Usa `30s`, `10m`, `2h`, `7d`, `2w`, `1mo` o `1y` (máximo 1 año)."),
                 ephemeral=True,
             )
             return
-        expires_at, total_days = parsed
+        expires_at, human = parsed
 
         if rol >= interaction.guild.me.top_role:
             await interaction.response.send_message(embed=error_embed("No puedo asignar un rol igual o superior al mío."), ephemeral=True)
             return
 
         try:
-            await usuario.add_roles(rol, reason=f"Rol temporal por {total_days} días (asignado por {interaction.user})")
+            await usuario.add_roles(rol, reason=f"Rol temporal por {human} (asignado por {interaction.user})")
         except discord.Forbidden:
             await interaction.response.send_message(embed=error_embed("No tengo permiso para asignar ese rol."), ephemeral=True)
             return

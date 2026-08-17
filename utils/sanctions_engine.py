@@ -51,18 +51,6 @@ async def apply_sanction(
 
     full_reason = f"[{label}] {reason}"
 
-    try:
-        await member.send(
-            embed=base_embed(
-                f"Has recibido una sanción en **{guild.name}**.\n"
-                f"⚙️ Infracción: {label}\n📝 Razón: {reason}\n⚖️ Sanción: {punishment_label(punishment)}",
-                COLOR_ERROR,
-                title="🛡️ Sanción aplicada",
-            )
-        )
-    except discord.Forbidden:
-        pass
-
     if punishment == "warn":
         action = "warn"
     elif punishment == "warn_change":
@@ -81,7 +69,21 @@ async def apply_sanction(
         await guild.ban(member, reason=full_reason)
         await db.add_temp_ban(guild.id, member.id, days)
 
-    sanction_id = await db.log_staff_action(guild.id, member.id, staff_id, action, full_reason, evidence_url)
+    sanction_id = await db.log_staff_action(guild.id, member.id, staff_id, action, full_reason, evidence_url, infraction_key)
+
+    try:
+        from cogs.appeals import AppealPromptView
+        await member.send(
+            embed=base_embed(
+                f"Has recibido una sanción en **{guild.name}**.\n"
+                f"⚙️ Infracción: {label}\n📝 Razón: {reason}\n⚖️ Sanción: {punishment_label(punishment)}\n🆔 ID: `#{sanction_id}`",
+                COLOR_ERROR,
+                title="🛡️ Sanción aplicada",
+            ),
+            view=AppealPromptView(guild.id, sanction_id),
+        )
+    except discord.Forbidden:
+        pass
 
     desc = (
         f"👤 Usuario: {member.mention} (`{member.id}`)\n"
