@@ -230,3 +230,21 @@ async def render_banner(title: str, subtitle: str, guild_icon_url: str | None = 
     banner.convert("RGB").save(buffer, format="PNG")
     buffer.seek(0)
     return buffer
+
+
+# Paleta de acentos por categoría (determinista por nombre, sin necesidad de guardar color en DB)
+CATEGORY_PALETTE = [
+    "#2BBFB3",  # teal
+    "#5865F2",  # blurple
+    "#EB459E",  # rosa
+    "#F1C40F",  # amarillo
+    "#ED4245",  # rojo
+    "#57F287",  # verde
+    "#FF9F43",  # naranja
+]
+
+
+def category_accent(label: str) -> str:
+    """Color determinista por nombre de categoría — misma categoría siempre el mismo color."""
+    index = sum(ord(c) for c in label) % len(CATEGORY_PALETTE)
+    return CATEGORY_PALETTE[index]

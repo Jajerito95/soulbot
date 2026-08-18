@@ -261,6 +261,10 @@ async def init_db():
     if "temprole_seconds" not in shop_cols:
         await _db.execute("ALTER TABLE shop_items ADD COLUMN temprole_seconds INTEGER")
 
+    tickets_cols = {row[1] for row in await (await _db.execute("PRAGMA table_info(tickets)")).fetchall()}
+    if "claimed_at" not in tickets_cols:
+        await _db.execute("ALTER TABLE tickets ADD COLUMN claimed_at TEXT")
+
     await _db.commit()
 
 
@@ -434,8 +438,52 @@ async def close_ticket(channel_id: int):
 
 
 async def claim_ticket(channel_id: int, staff_id: int):
-    await _db.execute("UPDATE tickets SET claimed_by = ? WHERE channel_id = ?", (staff_id, channel_id))
+    await _db.execute(
+        "UPDATE tickets SET claimed_by = ?, claimed_at = CURRENT_TIMESTAMP WHERE channel_id = ?", (staff_id, channel_id)
+    )
     await _db.commit()
+
+
+async def get_ticket_stats(guild_id: int) -> dict:
+    import datetime
+    today = datetime.datetime.utcnow().date().isoformat()
+
+    cur = await _db.execute("SELECT COUNT(*) FROM tickets WHERE guild_id = ? AND status = 'open'", (guild_id,))
+    open_count = (await cur.fetchone())[0]
+
+    cur = await _db.execute(
+        "SELECT COUNT(*) FROM tickets WHERE guild_id = ? AND status = 'closed' AND closed_at >= ?", (guild_id, today)
+    )
+    closed_today = (await cur.fetchone())[0]
+
+    cur = await _db.execute(
+        """SELECT AVG(julianday(claimed_at) - julianday(created_at)) * 24 * 60
+           FROM tickets WHERE guild_id = ? AND claimed_at IS NOT NULL""",
+        (guild_id,),
+    )
+    avg_claim_minutes = (await cur.fetchone())[0]
+
+    cur = await _db.execute(
+        """SELECT AVG(julianday(closed_at) - julianday(created_at)) * 24 * 60
+           FROM tickets WHERE guild_id = ? AND closed_at IS NOT NULL""",
+        (guild_id,),
+    )
+    avg_resolution_minutes = (await cur.fetchone())[0]
+
+    cur = await _db.execute(
+        """SELECT claimed_by, COUNT(*) FROM tickets WHERE guild_id = ? AND claimed_by IS NOT NULL
+           GROUP BY claimed_by ORDER BY COUNT(*) DESC LIMIT 5""",
+        (guild_id,),
+    )
+    top_staff = await cur.fetchall()
+
+    return {
+        "open": open_count,
+        "closed_today": closed_today,
+        "avg_claim_minutes": avg_claim_minutes,
+        "avg_resolution_minutes": avg_resolution_minutes,
+        "top_staff": top_staff,
+    }
 
 
 # ---------- cola de tickets ----------
