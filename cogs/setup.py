@@ -6,7 +6,7 @@ from discord.ext import commands
 
 from database import update_guild_config, get_guild_config
 from utils.embeds import success_embed, error_embed
-from cogs.tickets import build_panel_embed, TicketPanelView, load_categories
+from cogs.tickets import build_panel_embed, build_panel_banner, TicketPanelView, load_categories
 
 
 class SetupCog(commands.Cog):
@@ -203,7 +203,8 @@ class SetupCog(commands.Cog):
                 return
             view = TicketPanelView(load_categories(config))
             self.bot.add_view(view)
-            await target.send(embed=build_panel_embed(), view=view)
+            banner_file = await build_panel_banner(interaction.guild)
+            await target.send(embed=build_panel_embed(), view=view, file=banner_file)
 
         categoria_txt = f"<#{config['tickets_category_id']}>" if config["tickets_category_id"] else "No configurada"
         staff_txt = f"<@&{config['tickets_staff_role_id']}>" if config["tickets_staff_role_id"] else "No configurado"

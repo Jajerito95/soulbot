@@ -115,15 +115,18 @@ class LevelsCog(commands.Cog):
         target = usuario or interaction.user
         data = await db.get_level_data(interaction.guild_id, target.id)
         level, xp_in_level, xp_needed = level_from_xp(data["xp"])
-        bar = progress_bar(xp_in_level, xp_needed)
 
-        embed = base_embed(
-            f"⭐ Nivel: **{level}**\n✨ XP total: **{data['xp']}**\n{bar} `{xp_in_level}/{xp_needed}`",
-            COLOR,
-            title=f"📊 {target.display_name}",
+        saved_color = await db.get_card_color(interaction.guild_id, target.id)
+        top = await db.get_leaderboard_alltime(interaction.guild_id, limit=1000)
+        position = next((i + 1 for i, row in enumerate(top) if row[0] == target.id), len(top) + 1 if top else 1)
+
+        await interaction.response.defer()
+        from utils.card_renderer import render_card
+        buffer = await render_card(
+            username=target.name, avatar_url=target.display_avatar.url,
+            level=level, xp_current=xp_in_level, xp_needed=xp_needed, rank=position, accent_hex=saved_color,
         )
-        embed.set_thumbnail(url=target.display_avatar.url)
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(file=discord.File(buffer, filename="level.png"))
 
     @app_commands.command(name="card", description="Ve y personaliza tu tarjeta de nivel")
     @app_commands.describe(usuario="Usuario a consultar (opcional)", color="Color HEX para personalizar tu tarjeta (ej: #5865F2)")

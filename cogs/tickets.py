@@ -29,8 +29,7 @@ def load_categories(config: dict) -> list[tuple[str, str]]:
 
 def build_panel_embed() -> discord.Embed:
     embed = discord.Embed(color=COLOR)
-    embed.set_author(name="SoulBot • Support")
-    embed.title = "🌳 ¿Necesitas Ayuda?"
+    embed.set_image(url="attachment://ticket_banner.png")
     embed.description = (
         "Abre un ticket en la categoría correspondiente y sé paciente. "
         "La impaciencia o abrir tickets innecesarios resultará en sanciones."
@@ -44,6 +43,13 @@ def build_panel_embed() -> discord.Embed:
     embed.add_field(name="🙏 Te atenderemos lo más rápido posible", value="Gracias por tu paciencia y comprensión.", inline=False)
     embed.set_footer(text="SoulSeeker™ | All rights reserved.", icon_url=get_footer_icon())
     return embed
+
+
+async def build_panel_banner(guild: discord.Guild) -> discord.File:
+    from utils.card_renderer import render_banner
+    guild_icon = guild.icon.url if guild.icon else None
+    buffer = await render_banner("🌳 ¿Necesitas Ayuda?", "SoulBot • Support", guild_icon)
+    return discord.File(buffer, filename="ticket_banner.png")
 
 
 class TicketSelect(discord.ui.Select):
