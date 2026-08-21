@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel Staff — SoulBot</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="navbar">
+    <div class="brand"><span class="dot"></span> SoulBot <span style="color: var(--blurple); font-size:14px;">STAFF</span></div>
+    <div>
+      <a href="/me">Mi panel</a>
+      <a href="/logout">Cerrar sesión</a>
+      <span class="user"><img src="{{ user.avatar }}"> {{ user.username }}</span>
+    </div>
+  </div>
+
+  <div class="container">
+    <h1>Panel de Staff 🛡️</h1>
+
+    <div class="grid" style="margin-bottom: 24px;">
+      <div class="stat"><div class="value">{{ open_tickets }}</div><div class="label">🎫 Tickets abiertos</div></div>
+      <div class="stat"><div class="value">{{ pending_appeals }}</div><div class="label">📮 Apelaciones pendientes</div></div>
+      <div class="stat"><div class="value">{{ total_members_tracked }}</div><div class="label">👥 Miembros con nivel</div></div>
+    </div>
+
+    <div class="card">
+      <h2>⚙️ Módulos</h2>
+      <p style="color: var(--text-dim); font-size: 14px; margin-top: -8px;">Activa o desactiva sistemas enteros al instante.</p>
+
+      <div class="toggle-row">
+        <span>⭐ Sistema de niveles</span>
+        <form method="POST" action="/staff/modules"><input type="hidden" name="module" value="levels_enabled">
+          <button class="toggle-switch {{ 'on' if config.levels_enabled else 'off' }}"><span class="knob"></span></button>
+        </form>
+      </div>
+      <div class="toggle-row">
+        <span>🤖 AutoMod</span>
+        <form method="POST" action="/staff/modules"><input type="hidden" name="module" value="automod_enabled">
+          <button class="toggle-switch {{ 'on' if config.automod_enabled else 'off' }}"><span class="knob"></span></button>
+        </form>
+      </div>
+      <div class="toggle-row">
+        <span>🎫 Tickets en pausa</span>
+        <form method="POST" action="/staff/modules"><input type="hidden" name="module" value="tickets_paused">
+          <button class="toggle-switch {{ 'on' if config.tickets_paused else 'off' }}"><span class="knob"></span></button>
+        </form>
+      </div>
+      <div class="toggle-row">
+        <span>🎉 Bonus XP de fin de semana</span>
+        <form method="POST" action="/staff/modules"><input type="hidden" name="module" value="xp_weekend_enabled">
+          <button class="toggle-switch {{ 'on' if config.xp_weekend_enabled else 'off' }}"><span class="knob"></span></button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>📮 Apelaciones pendientes</h2>
+      {% if appeals %}
+      <table>
+        <tr><th>ID</th><th>Sanción</th><th>Usuario</th><th>Razón</th><th></th></tr>
+        {% for a in appeals %}
+        <tr>
+          <td>#{{ a[0] }}</td>
+          <td>#{{ a[1] }}</td>
+          <td>{{ a[2] }}</td>
+          <td>{{ a[3][:60] }}</td>
+          <td>
+            <form method="POST" action="/staff/appeal/{{ a[0] }}/approve" style="display:inline">
+              <button class="btn btn-success btn-sm">Aprobar</button>
+            </form>
+            <form method="POST" action="/staff/appeal/{{ a[0] }}/deny" style="display:inline">
+              <button class="btn btn-danger btn-sm">Denegar</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <div class="empty">No hay apelaciones pendientes. 🎉</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>🔨 Banear usuario</h2>
+      <form method="POST" action="/staff/ban">
+        <input class="form-input" type="text" name="user_id" placeholder="ID de Discord del usuario" required>
+        <input class="form-input" type="text" name="reason" placeholder="Razón del ban">
+        <button class="btn btn-danger" type="submit">Banear</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

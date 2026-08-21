@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mi panel — SoulBot</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="navbar">
+    <div class="brand"><span class="dot"></span> SoulBot</div>
+    <div>
+      {% if is_staff %}<a href="/staff">Panel Staff</a>{% else %}<a href="/staff/login">¿Eres Staff?</a>{% endif %}
+      <a href="/logout">Cerrar sesión</a>
+      <span class="user"><img src="{{ user.avatar }}"> {{ user.username }}</span>
+    </div>
+  </div>
+
+  <div class="container">
+    <h1>Hola, {{ user.username }} 👋</h1>
+
+    <div class="grid" style="margin-bottom: 24px;">
+      <div class="stat"><div class="value">{{ level }}</div><div class="label">⭐ Nivel</div></div>
+      <div class="stat"><div class="value">{{ xp }}</div><div class="label">✨ XP total</div></div>
+      <div class="stat"><div class="value">{{ balance }}</div><div class="label">💰 SoulCoins</div></div>
+    </div>
+
+    <div class="card">
+      <h2>📈 Actividad reciente</h2>
+      <div class="tabs">
+        <a href="#" onclick="loadStats('day'); return false;" id="tab-day" class="tab-btn">Hoy</a>
+        <a href="#" onclick="loadStats('week'); return false;" id="tab-week" class="tab-btn active">Semana</a>
+        <a href="#" onclick="loadStats('month'); return false;" id="tab-month" class="tab-btn">Mes</a>
+      </div>
+      <div class="grid">
+        <div class="stat"><div class="value" id="stat-xp">—</div><div class="label">XP ganada</div></div>
+        <div class="stat"><div class="value" id="stat-earned">—</div><div class="label">💰 Coins ganadas</div></div>
+        <div class="stat"><div class="value" id="stat-spent">—</div><div class="label">💸 Coins gastadas</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🎫 Mis tickets recientes</h2>
+      {% if tickets %}
+      <table>
+        <tr><th>Categoría</th><th>Estado</th><th>Abierto</th><th></th></tr>
+        {% for t in tickets %}
+        <tr>
+          <td>{{ t[1] }}</td>
+          <td><span class="badge {{ 'open' if t[2] == 'open' else 'closed' }}">{{ t[2] }}</span></td>
+          <td>{{ t[3][:16] }}</td>
+          <td>{% if t[2] == 'closed' %}<a class="btn btn-secondary btn-sm" href="/me/ticket/{{ t[0] }}">Ver transcript</a>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <div class="empty">Todavía no has abierto ningún ticket.</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>🛡️ Mis sanciones</h2>
+      {% if sanctions %}
+      <table>
+        <tr><th>ID</th><th>Tipo</th><th>Razón</th><th>Fecha</th></tr>
+        {% for s in sanctions %}
+        <tr>
+          <td>#{{ s[0] }}</td>
+          <td>{{ s[1] }}</td>
+          <td>{{ s[2] }}</td>
+          <td>{{ s[3][:16] }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <div class="empty">No tienes ninguna sanción registrada. 🎉</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <script>
+    async function loadStats(periodo) {
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      document.getElementById('tab-' + periodo).classList.add('active');
+      const res = await fetch('/me/stats?periodo=' + periodo);
+      const data = await res.json();
+      document.getElementById('stat-xp').textContent = data.xp_ganada;
+      document.getElementById('stat-earned').textContent = data.coins_ganadas;
+      document.getElementById('stat-spent').textContent = data.coins_gastadas;
+    }
+    loadStats('week');
+  </script>
+</body>
+</html>

@@ -174,6 +174,15 @@ async def init_db():
             temprole_seconds INTEGER
         );
 
+        CREATE TABLE IF NOT EXISTS economy_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            amount INTEGER,
+            reason TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE TABLE IF NOT EXISTS appeals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER,
@@ -669,7 +678,7 @@ async def get_balance(guild_id: int, user_id: int) -> int:
     return row[0] if row else 0
 
 
-async def add_coins(guild_id: int, user_id: int, amount: int) -> int:
+async def add_coins(guild_id: int, user_id: int, amount: int, reason: str = "") -> int:
     """Suma (o resta si amount es negativo) SoulCoins. Nunca deja el balance por debajo de 0."""
     current = await get_balance(guild_id, user_id)
     new_balance = max(0, current + amount)
@@ -677,6 +686,10 @@ async def add_coins(guild_id: int, user_id: int, amount: int) -> int:
         """INSERT INTO economy (guild_id, user_id, balance) VALUES (?, ?, ?)
            ON CONFLICT(guild_id, user_id) DO UPDATE SET balance = ?""",
         (guild_id, user_id, new_balance, new_balance),
+    )
+    await _db.execute(
+        "INSERT INTO economy_transactions (guild_id, user_id, amount, reason) VALUES (?, ?, ?, ?)",
+        (guild_id, user_id, amount, reason),
     )
     await _db.commit()
     return new_balance
