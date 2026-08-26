@@ -18,7 +18,7 @@ def build_appeal_embed(appeal: dict, sanction: dict, user: discord.abc.User) -> 
         "approved": ("✅ Aprobada", COLOR_SUCCESS),
         "denied": ("❌ Denegada", COLOR_ERROR),
     }
-    status_text, color = status_map[appeal["status"]]
+    status_text, color = status_map.get(appeal.get("status") or "pending", status_map["pending"])
 
     embed = base_embed(
         f"👤 Usuario: <@{user.id}> (`{user.id}`)\n"
