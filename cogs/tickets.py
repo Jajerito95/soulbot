@@ -29,21 +29,31 @@ def load_categories(config: dict) -> list[tuple[str, str]]:
 
 def build_panel_embed() -> discord.Embed:
     embed = discord.Embed(color=COLOR)
-    embed.set_author(name="SoulBot • Support")
-    embed.title = "🌳 ¿Necesitas Ayuda?"
+    embed.set_image(url="attachment://ticket_banner.png")
     embed.description = (
         "Abre un ticket en la categoría correspondiente y sé paciente. "
         "La impaciencia o abrir tickets innecesarios resultará en sanciones."
     )
-    embed.add_field(name="🔔 Reglas de Tickets", value="\u200b", inline=False)
-    embed.add_field(name="1️⃣ Ten paciencia", value="Espera un tiempo razonable para que tu ticket sea atendido.", inline=False)
-    embed.add_field(name="2️⃣ Respeta al equipo del staff", value="No insultes ni faltes al respeto a los miembros del equipo.", inline=False)
-    embed.add_field(name="3️⃣ Mantente activo en el ticket", value="Responde oportunamente para evitar que tu ticket sea cerrado por inactividad.", inline=False)
-    embed.add_field(name="4️⃣ Elige la categoría correcta", value="Abre tickets en la categoría adecuada para evitar sanciones.", inline=False)
-    embed.add_field(name="5️⃣ Evita abrir tickets sin motivo", value="Los tickets sin razón válida son sancionables.", inline=False)
-    embed.add_field(name="🙏 Te atenderemos lo más rápido posible", value="Gracias por tu paciencia y comprensión.", inline=False)
+    embed.add_field(
+        name="🔔 Reglas rápidas",
+        value=(
+            "🕐 Ten paciencia — espera tu turno\n"
+            "🤝 Respeta al Staff\n"
+            "💬 Mantente activo o se cerrará por inactividad\n"
+            "📂 Elige bien la categoría\n"
+            "🚫 Sin motivo válido = sancionable"
+        ),
+        inline=False,
+    )
     embed.set_footer(text="SoulSeeker™ | All rights reserved.", icon_url=get_footer_icon())
     return embed
+
+
+async def build_panel_banner(guild: discord.Guild) -> discord.File:
+    from utils.card_renderer import render_banner
+    guild_icon = guild.icon.url if guild.icon else None
+    buffer = await render_banner("🌳 ¿Necesitas Ayuda?", "SoulBot • Support", guild_icon)
+    return discord.File(buffer, filename="ticket_banner.png")
 
 
 class TicketSelect(discord.ui.Select):
@@ -71,8 +81,12 @@ class TicketPanelView(discord.ui.View):
 
 
 class TicketControlView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, claimed: bool = False):
         super().__init__(timeout=None)
+        if claimed:
+            self.claim_btn.style = discord.ButtonStyle.secondary
+            self.claim_btn.label = "Reclamado"
+            self.claim_btn.disabled = True
 
     @discord.ui.button(label="Reclamar", emoji="🙋", style=discord.ButtonStyle.primary, custom_id="soulbot:ticket_claim")
     async def claim_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -147,14 +161,21 @@ async def _create_ticket_channel(guild: discord.Guild, member: discord.Member, c
     await db.create_ticket(guild.id, channel.id, member.id, category)
 
     from utils.emojis import emoji
+    from utils.card_renderer import render_banner, category_accent
+
+    accent = category_accent(category)
+    banner_buf = await render_banner(category, f"Ticket de {member.display_name}", None, accent_hex=accent)
+    banner_file = discord.File(banner_buf, filename="ticket_open.png")
+
     embed = base_embed(
-        f"{emoji(guild, 'wave')} Hola {member.mention}, gracias por abrir un ticket.\n📂 Categoría: **{category}**\n\n"
+        f"{emoji(guild, 'wave')} Hola {member.mention}, gracias por abrir un ticket.\n\n"
         "Un miembro del Staff te atenderá en breve. Mientras tanto, cuéntanos con detalle tu caso.",
-        COLOR,
+        int(accent.lstrip("#"), 16),
         title=f"{emoji(guild, 'ticket')} Ticket abierto",
     )
+    embed.set_image(url="attachment://ticket_open.png")
     mention = staff_role.mention if staff_role else ""
-    await channel.send(content=f"{member.mention} {mention}".strip(), embed=embed, view=TicketControlView())
+    await channel.send(content=f"{member.mention} {mention}".strip(), embed=embed, view=TicketControlView(), file=banner_file)
 
     return channel
 
@@ -174,6 +195,15 @@ async def do_claim(interaction: discord.Interaction):
         return
 
     await db.claim_ticket(interaction.channel_id, interaction.user.id)
+
+    if interaction.message and interaction.message.components:
+        try:
+            await interaction.response.edit_message(view=TicketControlView(claimed=True))
+            await interaction.followup.send(embed=success_embed(f"🙋 Ticket reclamado por {interaction.user.mention}."))
+            return
+        except discord.InteractionResponded:
+            pass
+
     await interaction.response.send_message(embed=success_embed(f"🙋 Ticket reclamado por {interaction.user.mention}."))
 
 
@@ -301,11 +331,40 @@ class TicketsCog(commands.Cog):
             "🔁 `/ticket transferclaim usuario` — transfiere el ticket a otro Staff\n"
             "➕ `/ticket adduser usuario` — añade a alguien al ticket\n"
             "🔒 `/ticket close razon?` — cierra el ticket y genera transcript\n"
+            "📊 `/ticket stats` — estadísticas del sistema (Staff)\n"
             "⚙️ `/setup tickets` — configuración (Staff)",
             COLOR,
             title="📋 Comandos de Tickets",
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @ticket_group.command(name="stats", description="Estadísticas del sistema de tickets (Staff)")
+    async def stats(self, interaction: discord.Interaction):
+        if not await _is_staff(interaction):
+            await interaction.response.send_message(embed=error_embed("Solo el Staff puede ver las estadísticas."), ephemeral=True)
+            return
+
+        data = await db.get_ticket_stats(interaction.guild_id)
+
+        def fmt_minutes(m):
+            if m is None:
+                return "Sin datos"
+            if m < 60:
+                return f"{m:.0f} min"
+            return f"{m / 60:.1f} h"
+
+        top_lines = "\n".join(f"<@{staff_id}> — {count} tickets" for staff_id, count in data["top_staff"]) or "Sin datos todavía"
+
+        embed = base_embed(
+            f"🎫 Tickets abiertos ahora: **{data['open']}**\n"
+            f"✅ Cerrados hoy: **{data['closed_today']}**\n"
+            f"⏱️ Tiempo medio hasta reclamar: **{fmt_minutes(data['avg_claim_minutes'])}**\n"
+            f"⏳ Tiempo medio de resolución: **{fmt_minutes(data['avg_resolution_minutes'])}**\n\n"
+            f"🏆 **Top Staff (tickets atendidos):**\n{top_lines}",
+            COLOR,
+            title="📊 Estadísticas de Tickets",
+        )
+        await interaction.response.send_message(embed=embed)
 
 
 async def setup(bot: commands.Bot):

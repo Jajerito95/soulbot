@@ -14,6 +14,20 @@ DAILY_MIN, DAILY_MAX = 100, 250
 DAILY_COOLDOWN_HOURS = 24
 
 
+def _seconds_to_human(seconds: int) -> str:
+    if seconds >= 31536000:
+        return f"{seconds // 31536000} año(s)"
+    if seconds >= 2592000:
+        return f"{seconds // 2592000} mes(es)"
+    if seconds >= 604800:
+        return f"{seconds // 604800} semana(s)"
+    if seconds >= 86400:
+        return f"{seconds // 86400} día(s)"
+    if seconds >= 3600:
+        return f"{seconds // 3600} hora(s)"
+    return f"{seconds // 60} minuto(s)"
+
+
 class EconomyCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -97,13 +111,18 @@ class EconomyCog(commands.Cog):
             await interaction.response.send_message(embed=error_embed("La tienda está vacía. El Staff aún no ha añadido artículos."))
             return
 
+        icons = {"role": "🎭", "temprole": "⏱️", "boost": "⚡", "xp": "⭐"}
         lines = []
         for item in items:
             if item["type"] == "role":
-                detail = f"🎭 Rol <@&{item['role_id']}>"
+                detail = f"🎭 Rol permanente <@&{item['role_id']}>"
+            elif item["type"] == "temprole":
+                detail = f"⏱️ Rol temporal <@&{item['role_id']}> por {_seconds_to_human(item['temprole_seconds'])}"
+            elif item["type"] == "xp":
+                detail = f"⭐ +{item['xp_amount']} XP instantánea"
             else:
                 detail = f"⚡ Boost x{item['boost_multiplier']} por {item['boost_minutes']} min"
-            lines.append(f"`#{item['id']}` **{item['name']}** — 💰 {item['price']}\n{detail}")
+            lines.append(f"{icons.get(item['type'], '•')} `#{item['id']}` **{item['name']}** — 💰 {item['price']}\n{detail}")
 
         embed = base_embed("\n\n".join(lines), COLOR, title="🛒 Tienda SoulSeeker™")
         await interaction.response.send_message(embed=embed)
@@ -135,6 +154,33 @@ class EconomyCog(commands.Cog):
             await interaction.user.add_roles(role, reason="Compra en la tienda de SoulCoins")
             await interaction.response.send_message(embed=success_embed(f"🎉 Compraste **{item['name']}** — {role.mention} añadido."))
 
+        elif item["type"] == "temprole":
+            role = interaction.guild.get_role(item["role_id"])
+            if not role:
+                await interaction.response.send_message(embed=error_embed("El rol de este artículo ya no existe. Avisa al Staff."), ephemeral=True)
+                return
+            await db.add_coins(interaction.guild_id, interaction.user.id, -item["price"])
+            expires = (datetime.datetime.utcnow() + datetime.timedelta(seconds=item["temprole_seconds"])).isoformat()
+            try:
+                await interaction.user.add_roles(role, reason="Compra en la tienda de SoulCoins (rol temporal)")
+            except discord.Forbidden:
+                await interaction.response.send_message(embed=error_embed("No pude asignarte el rol. Avisa al Staff."), ephemeral=True)
+                return
+            await db.add_temp_role(interaction.guild_id, interaction.user.id, role.id, expires, self.bot.user.id)
+            ts = int(datetime.datetime.fromisoformat(expires).timestamp())
+            await interaction.response.send_message(
+                embed=success_embed(f"⏱️ Compraste **{item['name']}** — {role.mention} hasta <t:{ts}:R>.")
+            )
+
+        elif item["type"] == "xp":
+            await db.add_coins(interaction.guild_id, interaction.user.id, -item["price"])
+            from utils.levels_engine import award_xp
+            result = await award_xp(interaction.guild, interaction.user, item["xp_amount"], log=False, apply_multiplier=False)
+            desc = f"⭐ Compraste **{item['name']}** — +{item['xp_amount']} XP instantánea."
+            if result["leveled_up"]:
+                desc += f"\n🎉 ¡Subiste a nivel **{result['new_level']}**!"
+            await interaction.response.send_message(embed=success_embed(desc))
+
         else:  # boost
             expires = (datetime.datetime.utcnow() + datetime.timedelta(minutes=item["boost_minutes"])).isoformat()
             await db.add_coins(interaction.guild_id, interaction.user.id, -item["price"])
@@ -153,28 +199,48 @@ class EconomyCog(commands.Cog):
 
     @economy_group.command(name="additem", description="Añade un artículo a la tienda")
     @app_commands.describe(
-        nombre="Nombre del artículo", precio="Precio en SoulCoins", tipo="role o boost",
-        rol="Rol a otorgar (si tipo=role)", multiplicador="Multiplicador de XP (si tipo=boost)",
-        duracion_minutos="Duración del boost en minutos (si tipo=boost)",
+        nombre="Nombre del artículo", precio="Precio en SoulCoins", tipo="Tipo de artículo",
+        rol="Rol a otorgar (tipo=role o temprole)",
+        multiplicador="Multiplicador de XP (tipo=boost)", duracion_minutos="Duración del boost en minutos (tipo=boost)",
+        xp_cantidad="Cantidad de XP a otorgar (tipo=xp)",
+        temprole_duracion="Duración del rol: 1h, 1d, 1w, 1mo... (tipo=temprole)",
     )
     @app_commands.choices(tipo=[
-        app_commands.Choice(name="Rol", value="role"),
+        app_commands.Choice(name="Rol permanente", value="role"),
+        app_commands.Choice(name="Rol temporal", value="temprole"),
         app_commands.Choice(name="Boost de XP", value="boost"),
+        app_commands.Choice(name="XP instantánea", value="xp"),
     ])
     async def additem(
         self, interaction: discord.Interaction, nombre: str, precio: int, tipo: app_commands.Choice[str],
         rol: Optional[discord.Role] = None, multiplicador: Optional[float] = None, duracion_minutos: Optional[int] = None,
+        xp_cantidad: Optional[int] = None, temprole_duracion: Optional[str] = None,
     ):
         if tipo.value == "role" and not rol:
             await interaction.response.send_message(embed=error_embed("Para un artículo de tipo `role` debes indicar el `rol`."), ephemeral=True)
             return
+        if tipo.value == "temprole":
+            if not rol or not temprole_duracion:
+                await interaction.response.send_message(embed=error_embed("Para `temprole` indica `rol` y `temprole_duracion`."), ephemeral=True)
+                return
+            from cogs.temproles import parse_duration
+            parsed = parse_duration(temprole_duracion)
+            if not parsed:
+                await interaction.response.send_message(embed=error_embed("Duración inválida. Usa `1h`, `1d`, `1w`, `1mo` (máx. 1 año)."), ephemeral=True)
+                return
+            expires_iso, _ = parsed
+            seconds = int((datetime.datetime.fromisoformat(expires_iso) - datetime.datetime.utcnow()).total_seconds())
         if tipo.value == "boost" and (not multiplicador or not duracion_minutos):
-            await interaction.response.send_message(embed=error_embed("Para un artículo de tipo `boost` indica `multiplicador` y `duracion_minutos`."), ephemeral=True)
+            await interaction.response.send_message(embed=error_embed("Para `boost` indica `multiplicador` y `duracion_minutos`."), ephemeral=True)
+            return
+        if tipo.value == "xp" and not xp_cantidad:
+            await interaction.response.send_message(embed=error_embed("Para `xp` indica `xp_cantidad`."), ephemeral=True)
             return
 
         item_id = await db.add_shop_item(
             interaction.guild_id, nombre, precio, tipo.value,
             role_id=rol.id if rol else None, boost_multiplier=multiplicador, boost_minutes=duracion_minutos,
+            xp_amount=xp_cantidad, temprole_seconds=seconds if tipo.value == "temprole" else None,
         )
         await interaction.response.send_message(embed=success_embed(f"Artículo **{nombre}** añadido con ID `#{item_id}`."))
 

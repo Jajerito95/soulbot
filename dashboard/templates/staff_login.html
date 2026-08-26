@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Acceso Staff — SoulBot</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="login-page">
+    <div class="logo">🛡️</div>
+    <div class="tagline">Acceso restringido al equipo de Staff</div>
+    <form method="POST" style="width: 320px;">
+      <input class="form-input" type="password" name="password" placeholder="Contraseña de Staff" required autofocus>
+      {% if error %}<p style="color: var(--red); margin-top: -6px;">{{ error }}</p>{% endif %}
+      <button class="btn btn-primary" type="submit" style="width: 100%;">Entrar</button>
+    </form>
+  </div>
+</body>
+</html>

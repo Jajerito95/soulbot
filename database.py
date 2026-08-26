@@ -169,7 +169,18 @@ async def init_db():
             type TEXT,
             role_id INTEGER,
             boost_multiplier REAL,
-            boost_minutes INTEGER
+            boost_minutes INTEGER,
+            xp_amount INTEGER,
+            temprole_seconds INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS economy_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            amount INTEGER,
+            reason TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS appeals (
@@ -183,6 +194,14 @@ async def init_db():
             reviewed_by INTEGER,
             reviewed_at TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS automod_warnings (
+            guild_id INTEGER,
+            user_id INTEGER,
+            category TEXT,
+            count INTEGER DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id, category)
         );
 
         CREATE TABLE IF NOT EXISTS temp_roles (
@@ -218,6 +237,12 @@ async def init_db():
         "levels_announce_channel_id": "INTEGER",
         "levels_enabled": "INTEGER DEFAULT 1",
         "appeals_channel_id": "INTEGER",
+        "automod_spam": "INTEGER DEFAULT 1",
+        "automod_flood": "INTEGER DEFAULT 1",
+        "automod_caps": "INTEGER DEFAULT 1",
+        "automod_ghostping": "INTEGER DEFAULT 1",
+        "automod_ads": "INTEGER DEFAULT 1",
+        "automod_warn_threshold": "INTEGER DEFAULT 2",
         "message_xp_min": "INTEGER DEFAULT 25",
         "message_xp_max": "INTEGER DEFAULT 75",
         "message_xp_cooldown": "INTEGER DEFAULT 30",
@@ -236,6 +261,18 @@ async def init_db():
     staff_cols = {row[1] for row in await (await _db.execute("PRAGMA table_info(staff_actions)")).fetchall()}
     if "evidence_url" not in staff_cols:
         await _db.execute("ALTER TABLE staff_actions ADD COLUMN evidence_url TEXT")
+    if "infraction_key" not in staff_cols:
+        await _db.execute("ALTER TABLE staff_actions ADD COLUMN infraction_key TEXT")
+
+    shop_cols = {row[1] for row in await (await _db.execute("PRAGMA table_info(shop_items)")).fetchall()}
+    if "xp_amount" not in shop_cols:
+        await _db.execute("ALTER TABLE shop_items ADD COLUMN xp_amount INTEGER")
+    if "temprole_seconds" not in shop_cols:
+        await _db.execute("ALTER TABLE shop_items ADD COLUMN temprole_seconds INTEGER")
+
+    tickets_cols = {row[1] for row in await (await _db.execute("PRAGMA table_info(tickets)")).fetchall()}
+    if "claimed_at" not in tickets_cols:
+        await _db.execute("ALTER TABLE tickets ADD COLUMN claimed_at TEXT")
 
     await _db.commit()
 
@@ -287,14 +324,27 @@ async def set_user_vote(message_id: int, user_id: int, vote: str):
 
 async def log_staff_action(
     guild_id: int, target_id: int, staff_id: int, action: str,
-    reason: Optional[str] = None, evidence_url: Optional[str] = None,
+    reason: Optional[str] = None, evidence_url: Optional[str] = None, infraction_key: Optional[str] = None,
 ) -> int:
     cur = await _db.execute(
-        "INSERT INTO staff_actions (guild_id, target_id, staff_id, action, reason, evidence_url) VALUES (?, ?, ?, ?, ?, ?)",
-        (guild_id, target_id, staff_id, action, reason, evidence_url),
+        "INSERT INTO staff_actions (guild_id, target_id, staff_id, action, reason, evidence_url, infraction_key) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (guild_id, target_id, staff_id, action, reason, evidence_url, infraction_key),
     )
     await _db.commit()
     return cur.lastrowid
+
+
+async def decrement_infraction_count(guild_id: int, user_id: int, infraction_key: str):
+    await _db.execute(
+        "UPDATE infraction_counts SET count = MAX(count - 1, 0) WHERE guild_id = ? AND user_id = ? AND infraction_key = ?",
+        (guild_id, user_id, infraction_key),
+    )
+    await _db.commit()
+
+
+async def delete_staff_action(sanction_id: int):
+    await _db.execute("DELETE FROM staff_actions WHERE id = ?", (sanction_id,))
+    await _db.commit()
 
 
 async def get_user_sanctions(guild_id: int, user_id: int) -> list[dict]:
@@ -397,8 +447,52 @@ async def close_ticket(channel_id: int):
 
 
 async def claim_ticket(channel_id: int, staff_id: int):
-    await _db.execute("UPDATE tickets SET claimed_by = ? WHERE channel_id = ?", (staff_id, channel_id))
+    await _db.execute(
+        "UPDATE tickets SET claimed_by = ?, claimed_at = CURRENT_TIMESTAMP WHERE channel_id = ?", (staff_id, channel_id)
+    )
     await _db.commit()
+
+
+async def get_ticket_stats(guild_id: int) -> dict:
+    import datetime
+    today = datetime.datetime.utcnow().date().isoformat()
+
+    cur = await _db.execute("SELECT COUNT(*) FROM tickets WHERE guild_id = ? AND status = 'open'", (guild_id,))
+    open_count = (await cur.fetchone())[0]
+
+    cur = await _db.execute(
+        "SELECT COUNT(*) FROM tickets WHERE guild_id = ? AND status = 'closed' AND closed_at >= ?", (guild_id, today)
+    )
+    closed_today = (await cur.fetchone())[0]
+
+    cur = await _db.execute(
+        """SELECT AVG(julianday(claimed_at) - julianday(created_at)) * 24 * 60
+           FROM tickets WHERE guild_id = ? AND claimed_at IS NOT NULL""",
+        (guild_id,),
+    )
+    avg_claim_minutes = (await cur.fetchone())[0]
+
+    cur = await _db.execute(
+        """SELECT AVG(julianday(closed_at) - julianday(created_at)) * 24 * 60
+           FROM tickets WHERE guild_id = ? AND closed_at IS NOT NULL""",
+        (guild_id,),
+    )
+    avg_resolution_minutes = (await cur.fetchone())[0]
+
+    cur = await _db.execute(
+        """SELECT claimed_by, COUNT(*) FROM tickets WHERE guild_id = ? AND claimed_by IS NOT NULL
+           GROUP BY claimed_by ORDER BY COUNT(*) DESC LIMIT 5""",
+        (guild_id,),
+    )
+    top_staff = await cur.fetchall()
+
+    return {
+        "open": open_count,
+        "closed_today": closed_today,
+        "avg_claim_minutes": avg_claim_minutes,
+        "avg_resolution_minutes": avg_resolution_minutes,
+        "top_staff": top_staff,
+    }
 
 
 # ---------- cola de tickets ----------
@@ -584,7 +678,7 @@ async def get_balance(guild_id: int, user_id: int) -> int:
     return row[0] if row else 0
 
 
-async def add_coins(guild_id: int, user_id: int, amount: int) -> int:
+async def add_coins(guild_id: int, user_id: int, amount: int, reason: str = "") -> int:
     """Suma (o resta si amount es negativo) SoulCoins. Nunca deja el balance por debajo de 0."""
     current = await get_balance(guild_id, user_id)
     new_balance = max(0, current + amount)
@@ -592,6 +686,10 @@ async def add_coins(guild_id: int, user_id: int, amount: int) -> int:
         """INSERT INTO economy (guild_id, user_id, balance) VALUES (?, ?, ?)
            ON CONFLICT(guild_id, user_id) DO UPDATE SET balance = ?""",
         (guild_id, user_id, new_balance, new_balance),
+    )
+    await _db.execute(
+        "INSERT INTO economy_transactions (guild_id, user_id, amount, reason) VALUES (?, ?, ?, ?)",
+        (guild_id, user_id, amount, reason),
     )
     await _db.commit()
     return new_balance
@@ -633,11 +731,12 @@ async def get_economy_leaderboard(guild_id: int, limit: int = 10) -> list[tuple[
 
 async def add_shop_item(guild_id: int, name: str, price: int, item_type: str,
                          role_id: Optional[int] = None, boost_multiplier: Optional[float] = None,
-                         boost_minutes: Optional[int] = None) -> int:
+                         boost_minutes: Optional[int] = None, xp_amount: Optional[int] = None,
+                         temprole_seconds: Optional[int] = None) -> int:
     cur = await _db.execute(
-        """INSERT INTO shop_items (guild_id, name, price, type, role_id, boost_multiplier, boost_minutes)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (guild_id, name, price, item_type, role_id, boost_multiplier, boost_minutes),
+        """INSERT INTO shop_items (guild_id, name, price, type, role_id, boost_multiplier, boost_minutes, xp_amount, temprole_seconds)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (guild_id, name, price, item_type, role_id, boost_multiplier, boost_minutes, xp_amount, temprole_seconds),
     )
     await _db.commit()
     return cur.lastrowid
@@ -792,3 +891,32 @@ async def get_active_temp_roles(guild_id: int, user_id: int) -> list[tuple[int, 
         "SELECT role_id, expires_at FROM temp_roles WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
     )
     return await cur.fetchall()
+
+
+# ---------- avisos previos de AutoMod (antes de aplicar la sanción real) ----------
+
+async def get_automod_warning_count(guild_id: int, user_id: int, category: str) -> int:
+    cur = await _db.execute(
+        "SELECT count FROM automod_warnings WHERE guild_id = ? AND user_id = ? AND category = ?",
+        (guild_id, user_id, category),
+    )
+    row = await cur.fetchone()
+    return row[0] if row else 0
+
+
+async def increment_automod_warning(guild_id: int, user_id: int, category: str) -> int:
+    await _db.execute(
+        """INSERT INTO automod_warnings (guild_id, user_id, category, count) VALUES (?, ?, ?, 1)
+           ON CONFLICT(guild_id, user_id, category) DO UPDATE SET count = count + 1""",
+        (guild_id, user_id, category),
+    )
+    await _db.commit()
+    return await get_automod_warning_count(guild_id, user_id, category)
+
+
+async def reset_automod_warning(guild_id: int, user_id: int, category: str):
+    await _db.execute(
+        "DELETE FROM automod_warnings WHERE guild_id = ? AND user_id = ? AND category = ?",
+        (guild_id, user_id, category),
+    )
+    await _db.commit()

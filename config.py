@@ -37,3 +37,23 @@ RESET_PASSWORD = os.getenv("RESET_PASSWORD", "Chroma")
 # URL pública del servicio (la de Render), usada para enlazar transcripts en HTML.
 # Si no se define, se usa localhost (solo sirve en pruebas locales).
 PUBLIC_URL = os.getenv("PUBLIC_URL", f"http://localhost:{PORT}")
+
+# ---------------- Vinculacion Minecraft <-> Discord (/code) ----------------
+# RCON del servidor de Minecraft (para aplicar roles con /role adduser)
+RCON_HOST = os.getenv("RCON_HOST", "127.0.0.1")
+RCON_PORT = int(os.getenv("RCON_PORT", "25575"))
+RCON_PASS = os.getenv("RCON_PASS", "")
+
+# Postgres de Soulguard (donde se guardan los codigos de vinculacion)
+POSTGRES_URL = os.getenv("POSTGRES_URL", "")
+POSTGRES_USER = os.getenv("POSTGRES_USER", "")
+POSTGRES_PASS = os.getenv("POSTGRES_PASS", "")
+
+# Mapa de roles: ID de rol de Discord -> rol de Minecraft (Soulrole)
+DC_ROLE_TO_MC = {
+    "1532828482445508608": "leyenda soulseeker",
+    "1542266765130604554": "netherite",
+    "1542266835179806870": "Diamante",
+    "1542266869489078385": "hierro",
+}
+MC_ROLE_TO_DC = {v: k for k, v in DC_ROLE_TO_MC.items()}

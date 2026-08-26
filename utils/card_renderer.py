@@ -1,6 +1,7 @@
 from __future__ import annotations
 import io
 import os
+import re
 import asyncio
 
 import aiohttp
@@ -9,6 +10,21 @@ from PIL import Image, ImageDraw, ImageFont
 FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "fonts")
 FONT_BOLD = os.path.join(FONT_DIR, "Outfit-Bold.ttf")
 FONT_REGULAR = os.path.join(FONT_DIR, "Outfit-Regular.ttf")
+
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U00002190-\U000021FF"
+    "\U00002B00-\U00002BFF"
+    "\U0000FE0F"
+    "]+"
+)
+
+
+def _clean(text: str) -> str:
+    """Quita emoji Unicode del texto (la fuente Outfit no tiene esos glifos, salen como tofu)."""
+    return _EMOJI_RE.sub("", text).strip()
 
 CARD_W, CARD_H = 934, 282
 BG_COLOR = (30, 33, 36)
@@ -73,7 +89,7 @@ async def render_card(
     font_name = ImageFont.truetype(FONT_BOLD, 40)
     font_stats = ImageFont.truetype(FONT_REGULAR, 25)
 
-    draw.text((222, 78), f"@{username}", font=font_name, fill=(255, 255, 255, 255))
+    draw.text((222, 78), f"@{_clean(username)}", font=font_name, fill=(255, 255, 255, 255))
     stats_text = f"Nivel: {level} • XP: {xp_current}/{xp_needed} • Rank: #{rank}"
     draw.text((222, 138), stats_text, font=font_stats, fill=accent + (255,))
 
@@ -135,7 +151,7 @@ async def render_leaderboard(
         except Exception:
             pass
 
-    draw.text((84, 20), guild_name.upper(), font=font_title, fill=(255, 255, 255, 255))
+    draw.text((84, 20), _clean(guild_name).upper(), font=font_title, fill=(255, 255, 255, 255))
     draw.text((84, 54), f"Leaderboard • {period_label}", font=font_sub, fill=(160, 160, 165, 255))
     draw.line([(24, header_h - 6), (width - 24, header_h - 6)], fill=(55, 58, 63, 255), width=2)
 
@@ -154,7 +170,7 @@ async def render_leaderboard(
         ImageDraw.Draw(avatar_mask).ellipse((0, 0, 40, 40), fill=255)
         card.paste(avatar_img, (70, y + 12), avatar_mask)
 
-        draw.text((122, y + 8), entry["username"], font=font_user, fill=(255, 255, 255, 255))
+        draw.text((122, y + 8), _clean(entry["username"]), font=font_user, fill=(255, 255, 255, 255))
         draw.text((122, y + 32), entry["stat_text"], font=font_stat, fill=(150, 155, 160, 255))
 
         if entry.get("ratio") is not None:
@@ -170,3 +186,65 @@ async def render_leaderboard(
     card.convert("RGB").save(buffer, format="PNG")
     buffer.seek(0)
     return buffer
+
+
+async def render_banner(title: str, subtitle: str, guild_icon_url: str | None = None, accent_hex: str | None = None) -> io.BytesIO:
+    """Banner decorativo genérico (usado por el panel de tickets y similares)."""
+    accent = _hex_to_rgb(accent_hex) if accent_hex else ACCENT_DEFAULT
+    width, height = 934, 200
+
+    base = Image.new("RGBA", (width, height), BG_COLOR + (255,))
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    odraw.polygon(
+        [(width - 220, 0), (width, 0), (width, height), (width - 380, height)],
+        fill=accent + (255,),
+    )
+    base = Image.alpha_composite(base, overlay)
+
+    mask = Image.new("L", (width, height), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, width, height], radius=24, fill=255)
+    banner = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    banner.paste(base, (0, 0), mask)
+
+    draw = ImageDraw.Draw(banner)
+
+    text_x = 48
+    if guild_icon_url:
+        try:
+            icon_bytes = await _download(guild_icon_url)
+            icon_img = Image.open(io.BytesIO(icon_bytes)).convert("RGBA").resize((72, 72))
+            icon_mask = Image.new("L", (72, 72), 0)
+            ImageDraw.Draw(icon_mask).ellipse((0, 0, 72, 72), fill=255)
+            banner.paste(icon_img, (48, (height - 72) // 2), icon_mask)
+            text_x = 140
+        except Exception:
+            pass
+
+    font_title = ImageFont.truetype(FONT_BOLD, 38)
+    font_sub = ImageFont.truetype(FONT_REGULAR, 20)
+    draw.text((text_x, 68), _clean(title), font=font_title, fill=(255, 255, 255, 255))
+    draw.text((text_x, 118), subtitle, font=font_sub, fill=(180, 183, 188, 255))
+
+    buffer = io.BytesIO()
+    banner.convert("RGB").save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
+
+
+# Paleta de acentos por categoría (determinista por nombre, sin necesidad de guardar color en DB)
+CATEGORY_PALETTE = [
+    "#2BBFB3",  # teal
+    "#5865F2",  # blurple
+    "#EB459E",  # rosa
+    "#F1C40F",  # amarillo
+    "#ED4245",  # rojo
+    "#57F287",  # verde
+    "#FF9F43",  # naranja
+]
+
+
+def category_accent(label: str) -> str:
+    """Color determinista por nombre de categoría — misma categoría siempre el mismo color."""
+    index = sum(ord(c) for c in label) % len(CATEGORY_PALETTE)
+    return CATEGORY_PALETTE[index]
