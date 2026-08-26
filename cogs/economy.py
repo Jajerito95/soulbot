@@ -41,7 +41,14 @@ class EconomyCog(commands.Cog):
         coins = await db.get_balance(interaction.guild_id, target.id)
         embed = base_embed(f"💰 **{coins}** SoulCoins", COLOR, title=f"👛 Cartera de {target.display_name}")
         embed.set_thumbnail(url=target.display_avatar.url)
-        await interaction.response.send_message(embed=embed)
+        try:
+            from utils.card_renderer import render_profile
+            buf = await render_profile(target.display_name, target.display_avatar.url, coins)
+            file = discord.File(buf, filename="profile.png")
+            embed.set_image(url="attachment://profile.png")
+            await interaction.response.send_message(embed=embed, file=file)
+        except Exception:
+            await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="daily", description="Reclama tu recompensa diaria de SoulCoins")
     async def daily(self, interaction: discord.Interaction):

@@ -124,7 +124,7 @@ class LevelsCog(commands.Cog):
         from utils.card_renderer import render_card
         buffer = await render_card(
             username=target.name, avatar_url=target.display_avatar.url,
-            level=level, xp_current=xp_in_level, xp_needed=xp_needed, rank=position, accent_hex=saved_color,
+            level=level, xp_current=xp_in_level, xp_needed=xp_needed, rank=position, accent_hex=saved_color, total_xp=data["xp"],
         )
         await interaction.followup.send(file=discord.File(buffer, filename="level.png"))
 

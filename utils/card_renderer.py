@@ -52,6 +52,7 @@ async def render_card(
     xp_needed: int,
     rank: int,
     accent_hex: str | None = None,
+    total_xp: int | None = None,
 ) -> io.BytesIO:
     accent = _hex_to_rgb(accent_hex) if accent_hex else ACCENT_DEFAULT
 
@@ -92,6 +93,8 @@ async def render_card(
     draw.text((222, 78), f"@{_clean(username)}", font=font_name, fill=(255, 255, 255, 255))
     stats_text = f"Nivel: {level} • XP: {xp_current}/{xp_needed} • Rank: #{rank}"
     draw.text((222, 138), stats_text, font=font_stats, fill=accent + (255,))
+    if total_xp is not None:
+        draw.text((222, 168), f"XP Total: {total_xp:,}", font=font_stats, fill=(200, 203, 208, 255))
 
     # Barra de progreso
     bar_x, bar_y, bar_w, bar_h = 222, 190, 560, 26
@@ -228,6 +231,182 @@ async def render_banner(title: str, subtitle: str, guild_icon_url: str | None = 
 
     buffer = io.BytesIO()
     banner.convert("RGB").save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
+
+
+async def render_sanction(
+    username: str,
+    avatar_url: str,
+    action: str,
+    reason: str,
+    sanction_id,
+    count: int = 1,
+    accent_hex: str | None = None,
+) -> io.BytesIO:
+    """Tarjeta de sanción (Pillow) para el comando /sanction auto."""
+    accent = _hex_to_rgb(accent_hex) if accent_hex else ACCENT_DEFAULT
+    CARD_W, CARD_H = 934, 312
+
+    base = Image.new("RGBA", (CARD_W, CARD_H), BG_COLOR + (255,))
+    overlay = Image.new("RGBA", (CARD_W, CARD_H), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    odraw.polygon(
+        [(CARD_W - 220, 0), (CARD_W, 0), (CARD_W, CARD_H), (CARD_W - 380, CARD_H)],
+        fill=accent + (255,),
+    )
+    base = Image.alpha_composite(base, overlay)
+
+    mask = Image.new("L", (CARD_W, CARD_H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, CARD_W, CARD_H], radius=28, fill=255)
+    card = Image.new("RGBA", (CARD_W, CARD_H), (0, 0, 0, 0))
+    card.paste(base, (0, 0), mask)
+
+    draw = ImageDraw.Draw(card)
+
+    try:
+        avatar_bytes = await _download(avatar_url)
+        avatar_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((150, 150))
+    except Exception:
+        avatar_img = Image.new("RGBA", (150, 150), (80, 80, 80, 255))
+    avatar_mask = Image.new("L", (150, 150), 0)
+    ImageDraw.Draw(avatar_mask).ellipse((0, 0, 150, 150), fill=255)
+    card.paste(avatar_img, (48, 66), avatar_mask)
+    draw.ellipse((48, 66, 198, 216), outline=(255, 255, 255, 255), width=4)
+
+    font_name = ImageFont.truetype(FONT_BOLD, 38)
+    font_meta = ImageFont.truetype(FONT_REGULAR, 22)
+    font_reason = ImageFont.truetype(FONT_REGULAR, 22)
+
+    action_label = {"warn": "ADVERTENCIA", "ban": "BAN", "unban": "DESBANEO"}.get(action, str(action).upper())
+    draw.text((222, 70), f"@{_clean(username)}", font=font_name, fill=(255, 255, 255, 255))
+    draw.text((222, 120), f"Sanción: {action_label}", font=font_meta, fill=accent + (255,))
+    draw.text((222, 154), f"ID #{sanction_id}  •  Reincidencia #{count}", font=font_meta, fill=(170, 173, 178, 255))
+
+    reason_text = _clean(reason or "Sin razón")
+    max_w = 640
+    lines, cur = [], ""
+    for w in reason_text.split():
+        test = (cur + " " + w).strip()
+        if draw.textlength(test, font=font_reason) <= max_w:
+            cur = test
+        else:
+            if cur:
+                lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    lines = lines[:3]
+    y = 196
+    for ln in lines:
+        draw.text((222, y), ln, font=font_reason, fill=(210, 213, 218, 255))
+        y += 30
+
+    buffer = io.BytesIO()
+    card.convert("RGB").save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
+
+
+async def render_welcome(
+    username: str,
+    avatar_url: str,
+    guild_name: str,
+    guild_icon_url: str | None,
+    member_count: int,
+    accent_hex: str | None = None,
+) -> io.BytesIO:
+    """Tarjeta de bienvenida (Pillow) para on_member_join."""
+    accent = _hex_to_rgb(accent_hex) if accent_hex else ACCENT_DEFAULT
+    CARD_W, CARD_H = 934, 312
+
+    base = Image.new("RGBA", (CARD_W, CARD_H), BG_COLOR + (255,))
+    overlay = Image.new("RGBA", (CARD_W, CARD_H), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    odraw.polygon(
+        [(CARD_W - 220, 0), (CARD_W, 0), (CARD_W, CARD_H), (CARD_W - 380, CARD_H)],
+        fill=accent + (255,),
+    )
+    base = Image.alpha_composite(base, overlay)
+
+    mask = Image.new("L", (CARD_W, CARD_H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, CARD_W, CARD_H], radius=28, fill=255)
+    card = Image.new("RGBA", (CARD_W, CARD_H), (0, 0, 0, 0))
+    card.paste(base, (0, 0), mask)
+
+    draw = ImageDraw.Draw(card)
+
+    try:
+        avatar_bytes = await _download(avatar_url)
+        avatar_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((150, 150))
+    except Exception:
+        avatar_img = Image.new("RGBA", (150, 150), (80, 80, 80, 255))
+    avatar_mask = Image.new("L", (150, 150), 0)
+    ImageDraw.Draw(avatar_mask).ellipse((0, 0, 150, 150), fill=255)
+    card.paste(avatar_img, (48, 66), avatar_mask)
+    draw.ellipse((48, 66, 198, 216), outline=(255, 255, 255, 255), width=4)
+
+    font_welcome = ImageFont.truetype(FONT_BOLD, 30)
+    font_name = ImageFont.truetype(FONT_BOLD, 40)
+    font_sub = ImageFont.truetype(FONT_REGULAR, 22)
+
+    draw.text((222, 70), "¡BIENVENIDO/A!", font=font_welcome, fill=accent + (255,))
+    draw.text((222, 116), f"@{_clean(username)}", font=font_name, fill=(255, 255, 255, 255))
+    draw.text((222, 168), f"a {_clean(guild_name)}", font=font_sub, fill=(200, 203, 208, 255))
+    draw.text((222, 206), f"Miembros totales: {member_count}", font=font_sub, fill=(170, 173, 178, 255))
+
+    buffer = io.BytesIO()
+    card.convert("RGB").save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
+
+
+async def render_profile(
+    username: str,
+    avatar_url: str,
+    coins: int,
+    accent_hex: str | None = None,
+) -> io.BytesIO:
+    """Tarjeta de perfil/economía (Pillow) para /balance."""
+    accent = _hex_to_rgb(accent_hex) if accent_hex else ACCENT_DEFAULT
+    CARD_W, CARD_H = 520, 280
+
+    base = Image.new("RGBA", (CARD_W, CARD_H), BG_COLOR + (255,))
+    overlay = Image.new("RGBA", (CARD_W, CARD_H), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    odraw.polygon(
+        [(CARD_W - 120, 0), (CARD_W, 0), (CARD_W, CARD_H), (CARD_W - 220, CARD_H)],
+        fill=accent + (255,),
+    )
+    base = Image.alpha_composite(base, overlay)
+
+    mask = Image.new("L", (CARD_W, CARD_H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, CARD_W, CARD_H], radius=28, fill=255)
+    card = Image.new("RGBA", (CARD_W, CARD_H), (0, 0, 0, 0))
+    card.paste(base, (0, 0), mask)
+
+    draw = ImageDraw.Draw(card)
+
+    try:
+        avatar_bytes = await _download(avatar_url)
+        avatar_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((130, 130))
+    except Exception:
+        avatar_img = Image.new("RGBA", (130, 130), (80, 80, 80, 255))
+    avatar_mask = Image.new("L", (130, 130), 0)
+    ImageDraw.Draw(avatar_mask).ellipse((0, 0, 130, 130), fill=255)
+    card.paste(avatar_img, (40, 75), avatar_mask)
+    draw.ellipse((40, 75, 170, 205), outline=(255, 255, 255, 255), width=4)
+
+    font_name = ImageFont.truetype(FONT_BOLD, 30)
+    font_coins = ImageFont.truetype(FONT_BOLD, 34)
+    font_label = ImageFont.truetype(FONT_REGULAR, 18)
+
+    draw.text((200, 90), f"@{_clean(username)}", font=font_name, fill=(255, 255, 255, 255))
+    draw.text((200, 140), f"{coins:,} SoulCoins", font=font_coins, fill=accent + (255,))
+    draw.text((200, 184), "SoulSeeker Economy", font=font_label, fill=(170, 173, 178, 255))
+
+    buffer = io.BytesIO()
+    card.convert("RGB").save(buffer, format="PNG")
     buffer.seek(0)
     return buffer
 

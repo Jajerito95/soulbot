@@ -99,12 +99,25 @@ class SanctionCog(commands.Cog):
             await interaction.followup.send(embed=error_embed("No tengo permisos suficientes para sancionar a ese usuario."))
             return
 
-        await interaction.followup.send(
-            embed=success_embed(
-                f"{usuario.mention} sancionado: **{punishment_label(result['punishment'])}**\n"
-                f"ID de sanción: `#{result['sanction_id']}` • Reincidencia #{result['count']}"
-            )
+        embed = success_embed(
+            f"{usuario.mention} sancionado: **{punishment_label(result['punishment'])}**\n"
+            f"ID de sanción: `#{result['sanction_id']}` • Reincidencia #{result['count']}"
         )
+        try:
+            from utils.card_renderer import render_sanction
+            buf = await render_sanction(
+                usuario.display_name,
+                usuario.display_avatar.url,
+                result["punishment"],
+                razon,
+                result["sanction_id"],
+                result["count"],
+            )
+            file = discord.File(buf, filename="sanction_card.png")
+            embed.set_image(url="attachment://sanction_card.png")
+            await interaction.followup.send(embed=embed, file=file)
+        except Exception:
+            await interaction.followup.send(embed=embed)
 
     @sanction_auto.autocomplete("infraccion")
     async def infraccion_autocomplete(self, interaction: discord.Interaction, current: str):

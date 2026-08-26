@@ -93,7 +93,20 @@ class WelcomeCog(commands.Cog):
 
         template = config["welcome_message"] or DEFAULT_WELCOME
         embed = build_welcome_embed(member, template)
-        await channel.send(content=member.mention, embed=embed)
+        try:
+            from utils.card_renderer import render_welcome
+            buf = await render_welcome(
+                member.display_name,
+                member.display_avatar.url,
+                guild.name,
+                guild.icon.url if guild.icon else None,
+                guild.member_count,
+            )
+            file = discord.File(buf, filename="welcome.png")
+            embed.set_image(url="attachment://welcome.png")
+            await channel.send(content=member.mention, embed=embed, file=file)
+        except Exception:
+            await channel.send(content=member.mention, embed=embed)
 
     invites_group = app_commands.Group(name="invites", description="Sistema de invitaciones")
 
