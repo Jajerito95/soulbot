@@ -32,8 +32,8 @@ class _CursorWrapper:
 
 
 class TursoConnection:
-    def __init__(self, url: str, auth_token: str):
-        self._conn = libsql.connect(database=url, auth_token=auth_token)
+    def __init__(self, conn):
+        self._conn = conn
 
     @staticmethod
     def _safe_params(params):
@@ -69,4 +69,5 @@ class TursoConnection:
 
 
 async def connect(url: str, auth_token: str) -> TursoConnection:
-    return TursoConnection(url, auth_token)
+    conn = await asyncio.to_thread(libsql.connect, database=url, auth_token=auth_token)
+    return TursoConnection(conn)

@@ -40,6 +40,16 @@ class SoulBot(commands.Bot):
 
 bot = SoulBot()
 
+import discord.app_commands as app_commands
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error):
+    # 10062 = interaccion caducada (Discord la mato por timeout). No es un error
+    # de logica, solo latencia/arranque; lo ignoramos para no romper el flujo.
+    if isinstance(error, app_commands.CommandInvokeError) and isinstance(error.original, discord.NotFound):
+        return
+    log.exception("Error en comando slash: %s", error)
+
 
 @bot.event
 async def on_ready():
