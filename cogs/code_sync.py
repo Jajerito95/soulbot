@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import socket
 import struct
@@ -199,18 +200,21 @@ class CodeSyncCog(commands.Cog):
     @app_commands.describe(codigo="El codigo de 6 digitos que te dio el servidor en Minecraft")
     async def code(self, interaction: discord.Interaction, codigo: str):
         await interaction.response.defer(ephemeral=True)
-        link = fetch_link(codigo.strip())
+        try:
+            link = await asyncio.to_thread(fetch_link, codigo.strip())
+        except Exception:
+            link = None
         if not link:
             await interaction.followup.send(embed=error_embed(
                 "Codigo invalido", "Ese codigo no existe o ya caduco (10 min). Usa /code en Minecraft para generar uno."))
             return
-        if not bind_link(codigo.strip(), str(interaction.user.id)):
+        if not await asyncio.to_thread(bind_link, codigo.strip(), str(interaction.user.id)):
             await interaction.followup.send(embed=error_embed(
                 "Error", "No pude guardar la vinculacion en la base de datos."))
             return
 
         mcname = link["mcname"] or link["uuid"]
-        mc_roles = mc_roles(mcname)
+        mc_roles = await asyncio.to_thread(mc_roles, mcname)
         member = interaction.user
         dc_role_ids = {str(r.id) for r in member.roles}
 
@@ -219,7 +223,7 @@ class CodeSyncCog(commands.Cog):
         # DC -> MC
         for dcid, mcrole in DC_ROLE_TO_MC.items():
             if dcid in dc_role_ids and mcrole.lower() not in mc_roles:
-                resp = rcon_command(f"role adduser {mcname} {mcrole}")
+                resp = await asyncio.to_thread(rcon_command, f"role adduser {mcname} {mcrole}")
                 if resp is not None:
                     added_mc.append(mcrole)
         # MC -> DC
@@ -238,7 +242,10 @@ class CodeSyncCog(commands.Cog):
         lines.append("• Roles agregados en Discord: " + (", ".join(added_dc) if added_dc else "ninguno"))
         if not added_mc and not added_dc:
             lines.append("• Tus roles ya estaban sincronizados en ambas plataformas.")
-        await interaction.followup.send(embed=base_embed("Vinculacion completa", "\n".join(lines), color=COLOR_SUCCESS))
+        try:
+            await interaction.followup.send(embed=base_embed("Vinculacion completa", "\n".join(lines), color=COLOR_SUCCESS))
+        except discord.NotFound:
+            pass
 
 
 async def setup(bot: commands.Bot):
