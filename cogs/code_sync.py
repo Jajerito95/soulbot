@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import re
+import secrets
 import socket
+import string
 import struct
+import time
 from typing import Optional
 
 import discord
@@ -139,15 +142,15 @@ def fetch_link(code: str):
                                 dbname=dbname, user=user or POSTGRES_USER, password=pw or POSTGRES_PASS,
                                 sslmode="require", connect_timeout=5)
         cur = conn.cursor()
-        cur.execute("SELECT code,uuid,mcname,discord_id,expires FROM aegis_links WHERE code=%s", (code,))
+        cur.execute("SELECT code,uuid,mcname,discord_id,expires,role FROM aegis_links WHERE code=%s", (code,))
         row = cur.fetchone()
         if not row:
             return None
-        code_v, uuid_v, mcname_v, discord_v, expires_v = row
-        if expires_v and expires_v < __import__("time").time() * 1000:
+        code_v, uuid_v, mcname_v, discord_v, expires_v, role_v = row
+        if expires_v and expires_v < time.time() * 1000:
             return None
         return {"code": code_v, "uuid": uuid_v, "mcname": mcname_v,
-                "discord_id": discord_v, "expires": expires_v}
+                "discord_id": discord_v, "expires": expires_v, "role": role_v}
     except Exception as e:
         log(f"Postgres link error: {e}")
         return None
@@ -183,6 +186,94 @@ def bind_link(code: str, discord_id: str) -> bool:
     except Exception as e:
         log(f"Postgres bind error: {e}")
         return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def _connect_postgres():
+    import psycopg2
+    url = POSTGRES_URL
+    if url.startswith("postgresql://"):
+        url = url[len("postgresql://"):]
+    userinfo, _, rest = url.partition("@")
+    user = userinfo.split(":")[0] if ":" in userinfo else userinfo
+    pw = userinfo.split(":", 1)[1] if ":" in userinfo else POSTGRES_PASS
+    dbname = rest.split("/")[1] if "/" in rest else ""
+    return psycopg2.connect(host=rest.split("/")[0].split(":")[0],
+                            port=int((rest.split("/")[0].split(":") + ["5432"])[1]) if ":" in rest.split("/")[0] else 5432,
+                            dbname=dbname, user=user or POSTGRES_USER, password=pw or POSTGRES_PASS,
+                            sslmode="require", connect_timeout=5)
+
+
+def consume_link(code: str) -> bool:
+    if not POSTGRES_URL:
+        return False
+    conn = None
+    try:
+        conn = _connect_postgres()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM aegis_links WHERE code=%s", (code,))
+        conn.commit()
+        return True
+    except Exception as e:
+        log(f"Postgres consume error: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def generate_giveaway_code(role_id: str, creator_id: str):
+    if not POSTGRES_URL:
+        log("POSTGRES_URL no configurada")
+        return None
+    alphabet = string.ascii_uppercase + string.digits
+    conn = None
+    try:
+        conn = _connect_postgres()
+        cur = conn.cursor()
+        for _ in range(8):
+            code = "".join(secrets.choice(alphabet) for _ in range(8))
+            cur.execute("SELECT 1 FROM aegis_links WHERE code=%s", (code,))
+            if cur.fetchone():
+                continue
+            expires = int(time.time() * 1000) + 7 * 24 * 3600 * 1000
+            try:
+                cur.execute(
+                    "INSERT INTO aegis_links (code,uuid,mcname,discord_id,expires,role) "
+                    "VALUES (%s,NULL,NULL,NULL,%s,%s)",
+                    (code, expires, str(role_id)))
+                conn.commit()
+                return code
+            except psycopg2.IntegrityError:
+                conn.rollback()
+                continue
+        return None
+    except Exception as e:
+        log(f"Postgres giveaway error: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+
+def migrate_role_column():
+    if not POSTGRES_URL:
+        return
+    conn = None
+    try:
+        conn = _connect_postgres()
+        cur = conn.cursor()
+        cur.execute("ALTER TABLE aegis_links ADD COLUMN role TEXT")
+        conn.commit()
+        log("Columna 'role' agregada a aegis_links")
+    except Exception as e:
+        msg = str(e).lower()
+        if "already exists" in msg or "duplicate" in msg:
+            pass
+        else:
+            log(f"migrate role (ignorado): {e}")
     finally:
         if conn:
             conn.close()
@@ -237,6 +328,18 @@ class CodeSyncCog(commands.Cog):
                     except discord.HTTPException:
                         pass
 
+        # Codigo de regalo: asignar rol y consumir (una sola vez)
+        gift_role = link.get("role")
+        if gift_role and interaction.guild is not None:
+            role = interaction.guild.get_role(int(gift_role))
+            if role:
+                try:
+                    await member.add_roles(role, reason="Codigo de regalo SoulSeeker")
+                    added_dc.append(f"regalo: {role.name}")
+                except discord.HTTPException:
+                    pass
+            await asyncio.to_thread(consume_link, codigo.strip())
+
         lines = [f"Cuenta de Minecraft **{mcname}** vinculada correctamente.", ""]
         lines.append("• Roles agregados en Minecraft: " + (", ".join(added_mc) if added_mc else "ninguno"))
         lines.append("• Roles agregados en Discord: " + (", ".join(added_dc) if added_dc else "ninguno"))
@@ -248,5 +351,21 @@ class CodeSyncCog(commands.Cog):
             pass
 
 
+    @app_commands.command(name="codegenerate", description="Genera un codigo de regalo que otorga un rol al canjearlo")
+    @app_commands.describe(rol="Rol que recibira quien canjee el codigo")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def codegenerate(self, interaction: discord.Interaction, rol: discord.Role):
+        await interaction.response.defer(ephemeral=True)
+        code = await asyncio.to_thread(generate_giveaway_code, str(rol.id), str(interaction.user.id))
+        if not code:
+            await interaction.followup.send(embed=error_embed(
+                "Error", "No pude generar el codigo. Intentalo de nuevo."))
+            return
+        await interaction.followup.send(embed=success_embed(
+            "Codigo de regalo generado",
+            f"**Codigo:** `{code}`\n**Rol:** {rol.mention}\n**Valido:** 7 dias\n\n"
+            f"Quien lo canjee con `/code {code}` recibira el rol automaticamente."))
+
 async def setup(bot: commands.Bot):
+    await asyncio.to_thread(migrate_role_column)
     await bot.add_cog(CodeSyncCog(bot))
