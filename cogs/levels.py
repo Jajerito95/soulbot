@@ -161,6 +161,7 @@ class LevelsCog(commands.Cog):
             xp_needed=xp_needed,
             rank=position,
             accent_hex=saved_color,
+            total_xp=data["xp"],
         )
         await interaction.followup.send(file=discord.File(buffer, filename="card.png"))
 
@@ -186,11 +187,11 @@ class LevelsCog(commands.Cog):
 
     async def _send_leaderboard(self, interaction: discord.Interaction, periodo: str):
         if periodo == "alltime":
-            rows = await db.get_leaderboard_alltime(interaction.guild_id)
+            rows = await db.get_leaderboard_alltime(interaction.guild_id, limit=20)
             period_label = "All Time"
         else:
             days = 30 if periodo == "monthly" else 1
-            rows = await db.get_leaderboard_period(interaction.guild_id, days)
+            rows = await db.get_leaderboard_period(interaction.guild_id, days, limit=20)
             period_label = "Mensual" if periodo == "monthly" else "Diario"
 
         if not rows:
@@ -222,6 +223,11 @@ class LevelsCog(commands.Cog):
                     "username": member.name, "avatar_url": member.display_avatar.url,
                     "stat_text": f"+{gained} XP", "ratio": None,
                 })
+
+            # Mostrar siempre 10 (los usuarios que salieron del server se omiten,
+            # por eso pedimos 20 filas y nos quedamos con las 10 primeras validas)
+            if len(entries) >= 10:
+                break
 
         from utils.card_renderer import render_leaderboard
         guild_icon = interaction.guild.icon.url if interaction.guild.icon else None
