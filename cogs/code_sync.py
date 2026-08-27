@@ -265,15 +265,26 @@ def migrate_role_column():
     try:
         conn = _connect_postgres()
         cur = conn.cursor()
-        cur.execute("ALTER TABLE aegis_links ADD COLUMN role TEXT")
-        conn.commit()
-        log("Columna 'role' agregada a aegis_links")
+        stmts = [
+            ("ALTER TABLE aegis_links ADD COLUMN role TEXT",
+             "Columna 'role' agregada a aegis_links"),
+            ("ALTER TABLE aegis_links ALTER COLUMN uuid DROP NOT NULL",
+             "Columna 'uuid' ahora acepta NULL (codigos de regalo)"),
+        ]
+        for stmt, label in stmts:
+            try:
+                cur.execute(stmt)
+                conn.commit()
+                log(label)
+            except Exception as e:
+                conn.rollback()
+                msg = str(e).lower()
+                if "already exists" in msg or "duplicate" in msg:
+                    pass
+                else:
+                    log(f"migrate ignorado ({stmt}): {e}")
     except Exception as e:
-        msg = str(e).lower()
-        if "already exists" in msg or "duplicate" in msg:
-            pass
-        else:
-            log(f"migrate role (ignorado): {e}")
+        log(f"migrate error: {e}")
     finally:
         if conn:
             conn.close()
