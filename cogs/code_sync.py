@@ -214,7 +214,7 @@ class CodeSyncCog(commands.Cog):
             return
 
         mcname = link["mcname"] or link["uuid"]
-        mc_roles = await asyncio.to_thread(mc_roles, mcname)
+        mc_roles_list = await asyncio.to_thread(mc_roles, mcname)
         member = interaction.user
         dc_role_ids = {str(r.id) for r in member.roles}
 
@@ -222,13 +222,13 @@ class CodeSyncCog(commands.Cog):
         added_dc = []
         # DC -> MC
         for dcid, mcrole in DC_ROLE_TO_MC.items():
-            if dcid in dc_role_ids and mcrole.lower() not in mc_roles:
+            if dcid in dc_role_ids and mcrole.lower() not in mc_roles_list:
                 resp = await asyncio.to_thread(rcon_command, f"role adduser {mcname} {mcrole}")
                 if resp is not None:
                     added_mc.append(mcrole)
         # MC -> DC
         for mcrole, dcid in MC_ROLE_TO_DC.items():
-            if mcrole.lower() in mc_roles and dcid not in dc_role_ids:
+            if mcrole.lower() in mc_roles_list and dcid not in dc_role_ids:
                 role = interaction.guild.get_role(int(dcid))
                 if role:
                     try:
