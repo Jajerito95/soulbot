@@ -243,7 +243,7 @@ class CodeSyncCog(commands.Cog):
         if not added_mc and not added_dc:
             lines.append("• Tus roles ya estaban sincronizados en ambas plataformas.")
         try:
-            await interaction.followup.send(embed=base_embed("Vinculacion completa", "\n".join(lines), color=COLOR_SUCCESS))
+            await interaction.followup.send(embed=base_embed("\n".join(lines), color=COLOR_SUCCESS, title="Vinculacion completa"))
         except discord.NotFound:
             pass
 
