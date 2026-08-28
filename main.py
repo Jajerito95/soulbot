@@ -25,6 +25,12 @@ class SoulBot(commands.Bot):
 
     async def setup_hook(self):
         await init_db()
+        import database
+        if database.USING_TURSO:
+            log.info("DB: Turso (nube, persistente entre reinicios de Render).")
+        else:
+            log.warning("DB: SQLite LOCAL (se PIERDE en cada redeploy de Render Free). "
+                        "Define TURSO_DATABASE_URL y TURSO_AUTH_TOKEN para no perder datos.")
         for cog in COGS:
             await self.load_extension(cog)
             log.info(f"Cog cargado: {cog}")
