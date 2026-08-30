@@ -136,7 +136,17 @@ async def open_or_queue_ticket(interaction: discord.Interaction, category: str):
         return
 
     await interaction.response.defer(ephemeral=True)
-    channel = await _create_ticket_channel(guild, interaction.user, category, config)
+    try:
+        channel = await _create_ticket_channel(guild, interaction.user, category, config)
+    except discord.Forbidden as e:
+        await interaction.followup.send(embed=error_embed(f"No tengo permisos para crear el ticket. Verifica que tenga `Gestionar canales` en la categoría y en el servidor.\n`{e}`"), ephemeral=True)
+        return
+    except discord.HTTPException as e:
+        await interaction.followup.send(embed=error_embed(f"Error de Discord al crear el canal del ticket.\n`{e}`"), ephemeral=True)
+        return
+    except Exception as e:
+        await interaction.followup.send(embed=error_embed(f"Error inesperado al crear el ticket.\n`{e}`"), ephemeral=True)
+        return
     await interaction.followup.send(embed=success_embed(f"Ticket creado: {channel.mention}"), ephemeral=True)
 
 
@@ -263,12 +273,25 @@ class TicketsCog(commands.Cog):
         self.bot = bot
 
     async def cog_load(self):
-        # Re-registra los paneles persistentes de todos los servidores configurados
-        for guild in self.bot.guilds:
-            config = await db.get_guild_config(guild.id)
-            if config["tickets_panel_channel_id"]:
-                self.bot.add_view(TicketPanelView(load_categories(config)))
-        self.bot.add_view(TicketControlView())
+        # Vista persistente genérica: debe registrarse siempre, sin depender de bot.guilds
+        # (setup_hook se ejecuta antes de que los guilds estén en caché, por eso fallaba y el select parecía "roto").
+        # Usamos categorías por defecto; el panel real enviado por /setup tickets lleva las categorías actuales.
+        try:
+            self.bot.add_view(TicketPanelView([("Soporte", "🎫"), ("Reportes", "🚨"), ("Otro", "❓")]))
+        except Exception:
+            pass
+        try:
+            self.bot.add_view(TicketControlView())
+        except Exception:
+            pass
+        # Además intenta re-registrar por cada guild ya configurado (para logs de compatibilidad)
+        for guild in list(self.bot.guilds):
+            try:
+                config = await db.get_guild_config(guild.id)
+                if config.get("tickets_panel_channel_id"):
+                    self.bot.add_view(TicketPanelView(load_categories(config)))
+            except Exception:
+                pass
 
     ticket_group = app_commands.Group(name="ticket", description="Comandos para gestionar el ticket actual")
 

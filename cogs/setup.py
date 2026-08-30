@@ -371,14 +371,18 @@ class SetupCog(commands.Cog):
             ok("Permisos del bot en el canal de test")
         else:
             fail("Permisos del bot en el canal de test", "faltan send_messages/embed_links/attach_files")
+        if not perms.manage_messages:
+            warn("Permisos del bot en canal test", "sin manage_messages (no crítico)")
 
         # --- Base de datos ---
+        test_cfg = None
         try:
             test_cfg = await get_guild_config(interaction.guild_id)
             db_mode = "Turso (nube, persistente)" if __import__("database").USING_TURSO else "SQLite local (⚠️ no persiste en Render Free)"
             ok(f"Base de datos accesible — {db_mode}")
         except Exception as e:
             fail("Base de datos accesible", str(e))
+            test_cfg = {}
 
         # --- Canales configurados ---
         channel_checks = [
@@ -396,17 +400,123 @@ class SetupCog(commands.Cog):
                 warn(label, "no configurado")
                 continue
             ch = interaction.guild.get_channel(cid)
-            ok(label) if ch else fail(label, f"el canal `{cid}` ya no existe")
+            if ch:
+                ok(label)
+                # perm check extra para panel/logs
+                if key in ("tickets_panel_channel_id", "tickets_log_channel_id"):
+                    p2 = ch.permissions_for(interaction.guild.me)
+                    if not (p2.send_messages and p2.embed_links and p2.attach_files):
+                        warn(f"Permisos en {label}", "faltan send/embed/attach")
+            else:
+                fail(label, f"el canal `{cid}` ya no existe")
 
-        # --- Rol de Staff de tickets ---
-        if test_cfg.get("tickets_staff_role_id"):
-            role = interaction.guild.get_role(test_cfg["tickets_staff_role_id"])
-            ok("Rol de Staff de tickets") if role else fail("Rol de Staff de tickets", "el rol ya no existe")
+        # --- Tickets: estado general ---
+        try:
+            import database as db
+            open_cnt = await db.count_open_tickets(interaction.guild_id)
+            max_active = test_cfg.get("tickets_max_active", 15)
+            paused = bool(test_cfg.get("tickets_paused"))
+            # cola
+            cur = await db.db().execute("SELECT COUNT(*) FROM ticket_queue WHERE guild_id = ?", (interaction.guild_id,))
+            queue_len = (await cur.fetchone())[0]
+            if paused:
+                warn("Tickets", f"PAUSADOS manualmente — todo va a cola (abiertos: {open_cnt}/{max_active}, cola: {queue_len})")
+            elif open_cnt >= max_active:
+                warn("Tickets", f"al límite — {open_cnt}/{max_active} abiertos, cola: {queue_len} — nuevos tickets irán a cola (no es bug)")
+            else:
+                ok(f"Tickets — {open_cnt}/{max_active} abiertos, cola: {queue_len}, pausado: no")
+            # categorias
+            cats = load_categories(test_cfg)
+            if not cats or cats == [("Soporte","🎫")] and not test_cfg.get("tickets_categories"):
+                warn("Categorías de tickets", "usa valor por defecto (configura con /setup tickets categorias: Soporte,Reportes,Apelaciones)")
+            else:
+                ok(f"Categorías de tickets — {len(cats)}: {', '.join(l[0] for l in cats[:5])}")
+            # get_queue_position sin ORDER BY (test que no crashea con cola llena)
+            try:
+                # crea y borra entrada de test sin ensuciar cola real
+                tid = await db.add_to_queue(interaction.guild_id, interaction.user.id, "__test__")
+                pos = await db.get_queue_position(interaction.guild_id, tid)
+                await db.db().execute("DELETE FROM ticket_queue WHERE id = ?", (tid,))
+                await db.db().commit()
+                ok(f"Cola de tickets (SQL) — pos #{pos} OK")
+            except Exception as e:
+                fail("Cola de tickets (SQL)", str(e))
+        except Exception as e:
+            fail("Tickets: estado general", str(e))
 
-        # --- Categoría de tickets ---
-        if test_cfg.get("tickets_category_id"):
-            cat = interaction.guild.get_channel(test_cfg["tickets_category_id"])
-            ok("Categoría de tickets") if isinstance(cat, discord.CategoryChannel) else fail("Categoría de tickets", "no es una categoría válida")
+        # --- Tickets: categoría y permisos de creación ---
+        cat_id = test_cfg.get("tickets_category_id")
+        if not cat_id:
+            fail("Tickets: categoría", "no configurada — los tickets se crearán fuera de categoría y pueden heredar permisos incorrectos")
+        else:
+            cat = interaction.guild.get_channel(cat_id)
+            if not isinstance(cat, discord.CategoryChannel):
+                fail("Tickets: categoría", "no es una CategoryChannel válida")
+            else:
+                ok("Tickets: categoría")
+                c_perms = cat.permissions_for(interaction.guild.me)
+                if c_perms.manage_channels and c_perms.view_channel and c_perms.send_messages:
+                    ok("Permisos en categoría de tickets — manage_channels/view/send OK")
+                else:
+                    missing = []
+                    if not c_perms.manage_channels: missing.append("manage_channels")
+                    if not c_perms.view_channel: missing.append("view_channel")
+                    if not c_perms.send_messages: missing.append("send_messages")
+                    fail("Permisos en categoría de tickets", f"faltan: {', '.join(missing)} — el bot NO podrá crear tickets")
+                # channels_count check (Discord límite 50 por categoría)
+                if len(cat.channels) >= 48:
+                    warn("Categoría de tickets", f"cerca del límite: {len(cat.channels)}/50 canales — puede fallar al crear")
+                else:
+                    ok(f"Categoría de tickets — {len(cat.channels)}/50 canales usados")
+
+        # --- Tickets: rol staff y jerarquía ---
+        staff_id = test_cfg.get("tickets_staff_role_id")
+        if not staff_id:
+            warn("Tickets: rol staff", "no configurado — solo usuarios con manage_guild podrán reclamar")
+        else:
+            role = interaction.guild.get_role(staff_id)
+            if not role:
+                fail("Tickets: rol staff", "el rol ya no existe")
+            else:
+                ok(f"Tickets: rol staff — {role.name}")
+                # jerarquía: bot debe estar por encima del rol staff para dar overwrites
+                me_top = interaction.guild.me.top_role
+                if me_top.position > role.position:
+                    ok("Jerarquía de roles — el bot está por encima del rol staff")
+                elif me_top.position == role.position:
+                    warn("Jerarquía de roles", "el bot está al mismo nivel que el rol staff — funciona pero mejor ponlo por encima")
+                else:
+                    fail("Jerarquía de roles", f"el bot está DEBAJO del rol staff ({me_top.name} < {role.name}) — no podrá dar permisos de ver tickets al Staff")
+
+        # --- Tickets: panel ---
+        panel_id = test_cfg.get("tickets_panel_channel_id")
+        if panel_id:
+            panel_ch = interaction.guild.get_channel(panel_id)
+            if isinstance(panel_ch, discord.TextChannel):
+                # busca último mensaje del bot con el select
+                try:
+                    found_panel = False
+                    async for msg in panel_ch.history(limit=10):
+                        if msg.author.id == interaction.guild.me.id and msg.components:
+                            found_panel = True
+                            break
+                    if found_panel:
+                        ok("Panel de tickets — encontrado en el canal")
+                    else:
+                        warn("Panel de tickets", "no se encontró ningún panel del bot en los últimos 10 mensajes — usa /setup tickets enviar_panel:True")
+                except Exception as e:
+                    warn("Panel de tickets", f"no se pudo revisar historial: {e}")
+                # try render del banner
+                try:
+                    banner_file = await build_panel_banner(interaction.guild)
+                    await canal.send(content="🧪 Preview del banner de tickets:", file=banner_file)
+                    ok("Render del banner de tickets")
+                except Exception as e:
+                    fail("Render del banner de tickets", str(e))
+            else:
+                warn("Panel de tickets", "el canal no es de texto")
+        else:
+            warn("Panel de tickets", "no configurado")
 
         # --- AutoMod ---
         if test_cfg.get("automod_enabled"):
@@ -444,9 +554,30 @@ class SetupCog(commands.Cog):
         try:
             from utils.transcripts import generate_transcript
             path = await generate_transcript(canal)
+            # verifica PUBLIC_URL
+            from config import PUBLIC_URL
+            if "localhost" in PUBLIC_URL:
+                warn("Transcripts", f"PUBLIC_URL apunta a localhost ({PUBLIC_URL}) — en producción debe ser la URL de Render")
+            else:
+                ok(f"Transcripts — PUBLIC_URL {PUBLIC_URL} OK")
             ok("Generación de transcripts")
+            # borra el archivo temporal de test si quieres (lo dejamos)
         except Exception as e:
             fail("Generación de transcripts", str(e))
+
+        # --- RCON / Postgres (code sync MC<->DC) ---
+        try:
+            from config import RCON_HOST, RCON_PORT, POSTGRES_URL
+            if POSTGRES_URL:
+                ok(f"Postgres configurado — {POSTGRES_URL.split('@')[-1][:30]}...")
+            else:
+                warn("Postgres", "no configurado (POSTGRES_URL vacío) — /code no funcionará")
+            if RCON_HOST and RCON_PORT:
+                ok(f"RCON — {RCON_HOST}:{RCON_PORT}")
+            else:
+                warn("RCON", "no configurado")
+        except Exception as e:
+            warn("RCON/Postgres", str(e))
 
         # --- Emojis custom ---
         from utils.emojis import FALLBACKS
@@ -463,10 +594,10 @@ class SetupCog(commands.Cog):
 
         chunks = ["\n".join(results[i:i + 15]) for i in range(0, len(results), 15)]
         for i, chunk in enumerate(chunks):
-            embed = success_embed(chunk, title=f"🧪 Test de sistemas ({i+1}/{len(chunks)})")
+            embed = success_embed(chunk, title=f"🧪 Test de sistemas ({i+1}/{len(chunks)}) — tickets mejorado")
             await canal.send(embed=embed)
 
-        await canal.send(embed=success_embed(f"✅ {passed} OK · ⚠️ {warned} avisos · ❌ {failed} fallos", title="🧪 Resumen del test"))
+        await canal.send(embed=success_embed(f"✅ {passed} OK · ⚠️ {warned} avisos · ❌ {failed} fallos\n\nSi tickets fallaban por 'no van': revisa arriba `Categoría`, `Permisos en categoría`, `Jerarquía` y `pausado/límite`. Tras este fix, el select no debería dar 'La interacción ha fallado'.", title="🧪 Resumen del test"))
         await interaction.followup.send(embed=success_embed(f"Test completado en {canal.mention} — {passed} OK, {warned} avisos, {failed} fallos."), ephemeral=True)
 
 

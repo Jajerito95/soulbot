@@ -507,7 +507,7 @@ async def add_to_queue(guild_id: int, user_id: int, category: str) -> int:
 
 async def get_queue_position(guild_id: int, entry_id: int) -> int:
     cur = await _db.execute(
-        "SELECT COUNT(*) FROM ticket_queue WHERE guild_id = ? AND id <= ? ORDER BY id", (guild_id, entry_id)
+        "SELECT COUNT(*) FROM ticket_queue WHERE guild_id = ? AND id <= ?", (guild_id, entry_id)
     )
     row = await cur.fetchone()
     return row[0]
