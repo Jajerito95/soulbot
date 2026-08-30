@@ -149,22 +149,66 @@ class LogsCog(commands.Cog):
     async def on_message_delete(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
-        content = message.content or "*(sin contenido de texto)*"
+        parts: list[str] = []
+        if message.content and message.content.strip():
+            parts.append(message.content.strip()[:800])
+        if message.attachments:
+            att = ", ".join(f"[{a.filename}]({a.url})" for a in message.attachments[:5])
+            if len(message.attachments) > 5:
+                att += f" +{len(message.attachments)-5} más"
+            parts.append(f"📎 Adjuntos: {att}")
+        if message.embeds:
+            for e in message.embeds[:2]:
+                t = (e.title or "").strip()
+                d = (e.description or "").strip()
+                txt = f"{t} {d}".strip()
+                if txt:
+                    parts.append(f"🧩 Embed: {txt[:300]}")
+                elif e.type:
+                    parts.append(f"🧩 Embed ({e.type})")
+        if getattr(message, "stickers", None):
+            try:
+                if message.stickers:
+                    parts.append(f"😀 Sticker: {', '.join(s.name for s in message.stickers)}")
+            except Exception:
+                pass
+        # fallback: si Discord no cacheó contenido (intents/purge), intentar system_content
+        if not parts:
+            # para mensajes de sistema o con solo referencia
+            raw = (message.system_content or "").strip()
+            if raw:
+                parts.append(raw[:800])
+        content = "\n".join(parts) if parts else "*(sin contenido de texto)*"
+        # truncar embed total a 4000
+        if len(content) > 1000:
+            content = content[:1000] + "…"
         embed = log_embed(
             "💬 Mensaje eliminado",
-            f"👤 Autor: {message.author.mention}\n📍 Canal: {message.channel.mention}\n📝 Contenido: {content[:500]}",
+            f"👤 Autor: {message.author.mention} `{message.author.display_name}`\n📍 Canal: {message.channel.mention}\n📝 Contenido: {content}",
             color=COLOR_ERROR,
         )
+        # si había attachments, también reenviar primera imagen como archivo al log si es imagen
         await self._send(message.guild, "logs_messages", embed)
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
-        if before.author.bot or not before.guild or before.content == after.content:
+        if before.author.bot or not before.guild:
             return
+        # ignora si nada relevante cambió
+        if before.content == after.content and before.attachments == after.attachments and before.embeds == after.embeds:
+            return
+        def _fmt(m: discord.Message) -> str:
+            if m.content and m.content.strip():
+                return m.content.strip()[:400]
+            if m.attachments:
+                return f"📎 {', '.join(a.filename for a in m.attachments[:3])}"
+            if m.embeds and m.embeds[0].description:
+                return f"🧩 {m.embeds[0].description[:200]}"
+            return "*(vacío)*"
         embed = log_embed(
             "✏️ Mensaje editado",
             f"👤 Autor: {before.author.mention}\n📍 Canal: {before.channel.mention}\n"
-            f"**Antes:** {before.content[:400] or '*(vacío)*'}\n**Después:** {after.content[:400] or '*(vacío)*'}",
+            f"**Antes:** {_fmt(before)}\n**Después:** {_fmt(after)}",
         )
         await self._send(before.guild, "logs_messages", embed)
 

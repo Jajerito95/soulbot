@@ -150,7 +150,7 @@ async def open_or_queue_ticket(interaction: discord.Interaction, category: str):
     await interaction.followup.send(embed=success_embed(f"Ticket creado: {channel.mention}"), ephemeral=True)
 
 
-async def _create_ticket_channel(guild: discord.Guild, member: discord.Member, category: str, config: dict) -> discord.TextChannel:
+async def _create_ticket_channel(guild: discord.Guild, member: discord.Member, category: str, config: dict, ping: bool = True) -> discord.TextChannel:
     parent = guild.get_channel(config["tickets_category_id"]) if config["tickets_category_id"] else None
     staff_role = guild.get_role(config["tickets_staff_role_id"]) if config["tickets_staff_role_id"] else None
 
@@ -184,8 +184,13 @@ async def _create_ticket_channel(guild: discord.Guild, member: discord.Member, c
         title=f"{emoji(guild, 'ticket')} Ticket abierto",
     )
     embed.set_image(url="attachment://ticket_open.png")
-    mention = staff_role.mention if staff_role else ""
-    await channel.send(content=f"{member.mention} {mention}".strip(), embed=embed, view=TicketControlView(), file=banner_file)
+    if ping:
+        mention = staff_role.mention if staff_role else ""
+        content = f"{member.mention} {mention}".strip()
+        await channel.send(content=content, embed=embed, view=TicketControlView(), file=banner_file)
+    else:
+        # fast: sin ping, solo embed
+        await channel.send(embed=embed, view=TicketControlView(), file=banner_file)
 
     return channel
 
@@ -340,6 +345,46 @@ class TicketsCog(commands.Cog):
 
         await interaction.channel.set_permissions(usuario, view_channel=True, send_messages=True, read_message_history=True)
         await interaction.response.send_message(embed=success_embed(f"{usuario.mention} añadido al ticket."))
+
+    @ticket_group.command(name="fcreate", description="Crea un ticket rápido sin ping (fast)")
+    @app_commands.describe(categoria="Categoría (opcional, usa la primera por defecto)", usuario="Usuario para el que crear (solo Staff, opcional)")
+    async def fcreate(self, interaction: discord.Interaction, categoria: str | None = None, usuario: discord.Member | None = None):
+        # Fast path: sin ping, sin cola si es fcreate (bypass pausado/max), sin mención ruidosa
+        guild = interaction.guild
+        config = await db.get_guild_config(guild.id)
+        # si usuario especificado, solo Staff puede usarlo
+        target: discord.Member = interaction.user  # type: ignore
+        if usuario is not None:
+            if not await _is_staff(interaction):
+                await interaction.response.send_message(embed=error_embed("Solo el Staff puede crear tickets para otro usuario."), ephemeral=True)
+                return
+            target = usuario
+
+        # si ya tiene ticket abierto
+        existing = await db.get_open_ticket_for_user(guild.id, target.id)
+        if existing:
+            await interaction.response.send_message(embed=error_embed(f"{target.mention} ya tiene un ticket abierto: <#{existing['channel_id']}>"), ephemeral=True)
+            return
+
+        # categoría: la solicitada, o la primera disponible de la config
+        cat_label = categoria.strip() if categoria else None
+        if not cat_label:
+            cats = load_categories(config)
+            cat_label = cats[0][0] if cats else "Soporte"
+
+        await interaction.response.defer(ephemeral=True)
+        try:
+            channel = await _create_ticket_channel(guild, target, cat_label, config, ping=False)
+        except discord.Forbidden as e:
+            await interaction.followup.send(embed=error_embed(f"No tengo permisos para crear el ticket.\n`{e}`"), ephemeral=True)
+            return
+        except discord.HTTPException as e:
+            await interaction.followup.send(embed=error_embed(f"Error de Discord al crear el canal.\n`{e}`"), ephemeral=True)
+            return
+        except Exception as e:
+            await interaction.followup.send(embed=error_embed(f"Error inesperado.\n`{e}`"), ephemeral=True)
+            return
+        await interaction.followup.send(embed=success_embed(f"Ticket creado (fast, sin ping): {channel.mention} para {target.mention}"), ephemeral=True)
 
     @ticket_group.command(name="close", description="Cierra el ticket actual y genera el transcript")
     @app_commands.describe(razon="Motivo del cierre (opcional)")

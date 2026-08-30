@@ -18,6 +18,92 @@ MESSAGE_XP_RANGE = (25, 75)
 VOICE_XP_PER_MINUTE = 50
 
 
+class LeaderboardView(discord.ui.View):
+    """Botones de Pillow para cambiar periodo del leaderboard sin re-ejecutar el comando."""
+    def __init__(self, initial_periodo: str = "alltime"):
+        super().__init__(timeout=180)
+        self._set_active(initial_periodo)
+
+    def _set_active(self, periodo: str):
+        for child in self.children:
+            cid = getattr(child, "custom_id", None)
+            if cid and cid.startswith("lb:"):
+                is_active = cid == f"lb:{periodo}"
+                child.style = discord.ButtonStyle.primary if is_active else discord.ButtonStyle.secondary
+                child.disabled = is_active
+
+    async def _refresh(self, interaction: discord.Interaction, periodo: str):
+        from utils.embeds import error_embed
+        # defer para tener tiempo de generar la imagen Pillow
+        try:
+            await interaction.response.defer()
+        except discord.InteractionResponded:
+            pass
+        guild = interaction.guild
+        import database as db
+        from utils.levels_engine import level_from_xp
+        from utils.card_renderer import render_leaderboard
+        if periodo == "alltime":
+            rows = await db.get_leaderboard_alltime(guild.id, limit=20)
+            period_label = "All Time"
+        elif periodo == "monthly":
+            rows = await db.get_leaderboard_period(guild.id, 30, limit=20)
+            period_label = "Mensual"
+        else:
+            rows = await db.get_leaderboard_period(guild.id, 1, limit=20)
+            period_label = "Diario"
+        if not rows:
+            await interaction.followup.send(embed=error_embed("Todavía no hay datos suficientes."), ephemeral=True)
+            return
+        entries = []
+        for row in rows:
+            user_id = row[0]
+            member = guild.get_member(user_id)
+            if member is None:
+                try:
+                    member = await guild.fetch_member(user_id)
+                except discord.NotFound:
+                    continue
+            if periodo == "alltime":
+                xp, level = row[1], row[2]
+                _, xp_in, xp_need = level_from_xp(xp)
+                entries.append({"username": member.name, "avatar_url": member.display_avatar.url, "stat_text": f"Nivel {level} \u2022 {xp} XP", "ratio": xp_in / xp_need if xp_need else 0})
+            else:
+                entries.append({"username": member.name, "avatar_url": member.display_avatar.url, "stat_text": f"+{row[1]} XP", "ratio": None})
+            if len(entries) >= 10:
+                break
+        if not entries:
+            await interaction.followup.send(embed=error_embed("Sin miembros válidos para mostrar."), ephemeral=True)
+            return
+        guild_icon = guild.icon.url if guild.icon else None
+        buffer = await render_leaderboard(guild.name, guild_icon, entries, period_label)
+        file = discord.File(buffer, filename="leaderboard.png")
+        self._set_active(periodo)
+        try:
+            # edita el mensaje original del leaderboard (el del followup)
+            await interaction.message.edit(attachments=[file], view=self)
+        except discord.HTTPException:
+            # fallback: envía nuevo mensaje si no se puede editar
+            await interaction.followup.send(file=file, view=self)
+        # opcional: confirma silenciado
+        try:
+            await interaction.followup.send(f"Vista cambiada a **{period_label}**", ephemeral=True)
+        except Exception:
+            pass
+
+    @discord.ui.button(label="All Time", emoji="🏆", style=discord.ButtonStyle.secondary, custom_id="lb:alltime")
+    async def btn_alltime(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._refresh(interaction, "alltime")
+
+    @discord.ui.button(label="Diario", emoji="📅", style=discord.ButtonStyle.secondary, custom_id="lb:daily")
+    async def btn_daily(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._refresh(interaction, "daily")
+
+    @discord.ui.button(label="Mensual", emoji="🗓️", style=discord.ButtonStyle.secondary, custom_id="lb:monthly")
+    async def btn_monthly(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._refresh(interaction, "monthly")
+
+
 def parse_duration(text: str) -> Optional[str]:
     """Convierte '2h', '3d', '30m' en un timestamp ISO futuro. None = permanente."""
     if not text or text.lower() in ("perm", "permanente", "0"):
@@ -232,7 +318,8 @@ class LevelsCog(commands.Cog):
         from utils.card_renderer import render_leaderboard
         guild_icon = interaction.guild.icon.url if interaction.guild.icon else None
         buffer = await render_leaderboard(interaction.guild.name, guild_icon, entries, period_label)
-        await interaction.followup.send(file=discord.File(buffer, filename="leaderboard.png"))
+        view = LeaderboardView(initial_periodo=periodo)
+        await interaction.followup.send(file=discord.File(buffer, filename="leaderboard.png"), view=view)
 
     @app_commands.command(name="rewards", description="Muestra las recompensas de rol por nivel")
     async def rewards(self, interaction: discord.Interaction):
