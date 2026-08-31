@@ -272,10 +272,22 @@ async def init_db():
 
     tickets_cols = {row[1] for row in await (await _db.execute("PRAGMA table_info(tickets)")).fetchall()}
     if "claimed_at" not in tickets_cols:
-        await _db.execute("ALTER TABLE tickets ADD COLUMN claimed_at TEXT")
+        try:
+            await _db.execute("ALTER TABLE tickets ADD COLUMN claimed_at TEXT")
+        except Exception:
+            pass
     if "last_activity" not in tickets_cols:
-        await _db.execute("ALTER TABLE tickets ADD COLUMN last_activity TEXT DEFAULT CURRENT_TIMESTAMP")
-        await _db.execute("UPDATE tickets SET last_activity = COALESCE(created_at, CURRENT_TIMESTAMP) WHERE last_activity IS NULL")
+        try:
+            await _db.execute("ALTER TABLE tickets ADD COLUMN last_activity TEXT DEFAULT CURRENT_TIMESTAMP")
+            await _db.commit()
+        except Exception:
+            pass
+        # No hacer UPDATE masivo en Turso en el mismo init (evita SQLITE_UNKNOWN si el column aún no es visible)
+        # get_stale_tickets usa COALESCE(last_activity, created_at), así que NULL es válido
+        try:
+            await _db.execute("UPDATE tickets SET last_activity = COALESCE(created_at, CURRENT_TIMESTAMP) WHERE last_activity IS NULL")
+        except Exception:
+            pass
 
     await _db.commit()
 
