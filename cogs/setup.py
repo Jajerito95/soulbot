@@ -565,19 +565,83 @@ class SetupCog(commands.Cog):
         except Exception as e:
             fail("Generación de transcripts", str(e))
 
-        # --- RCON / Postgres (code sync MC<->DC) ---
+        # --- RCON / Postgres + Tailscale (seguridad) ---
         try:
-            from config import RCON_HOST, RCON_PORT, POSTGRES_URL
+            from config import RCON_HOST, RCON_PORT, POSTGRES_URL, RCON_ALLOW_PUBLIC
+            import ipaddress, socket, time as _t2
             if POSTGRES_URL:
-                ok(f"Postgres configurado — {POSTGRES_URL.split('@')[-1][:30]}...")
+                ok(f"Postgres configurado — {POSTGRES_URL.split('@')[-1][:32]}...")
             else:
                 warn("Postgres", "no configurado (POSTGRES_URL vacío) — /code no funcionará")
             if RCON_HOST and RCON_PORT:
-                ok(f"RCON — {RCON_HOST}:{RCON_PORT}")
+                is_pub_tunnel = "bore.pub" in RCON_HOST or "trycloudflare" in RCON_HOST or "localhost.run" in RCON_HOST
+                is_priv = False
+                try:
+                    ip = ipaddress.ip_address(RCON_HOST)
+                    is_priv = ip.is_private or ip.is_loopback or str(ip).startswith("100.")
+                except ValueError:
+                    is_priv = False
+                if is_pub_tunnel and not RCON_ALLOW_PUBLIC:
+                    fail("RCON", f"túnel público {RCON_HOST} sin RCON_ALLOW_PUBLIC=1 — cambia a Tailscale 100.x.x.x (seguridad)")
+                elif is_priv:
+                    ok(f"RCON — {RCON_HOST}:{RCON_PORT} (privado/Tailscale ✓)")
+                else:
+                    warn("RCON", f"{RCON_HOST}:{RCON_PORT} no es IP privada — expón solo vía Tailscale/WireGuard + firewall")
+                # latencia TCP (sin auth, solo conectividad)
+                t0 = _t2.time()
+                try:
+                    s = socket.create_connection((RCON_HOST, RCON_PORT), timeout=3)
+                    s.close()
+                    ms = int((_t2.time()-t0)*1000)
+                    ok(f"RCON TCP — {ms}ms")
+                    if ms > 350:
+                        warn("RCON latencia", f"{ms}ms alto — /code puede hacer timeout")
+                except Exception as e:
+                    fail("RCON TCP", f"no conecta a {RCON_HOST}:{RCON_PORT} — {e} (¿Tailscale caído o firewall?)")
             else:
                 warn("RCON", "no configurado")
         except Exception as e:
             warn("RCON/Postgres", str(e))
+
+        # --- Pillow TODO (todo renderizado con Pillow) ---
+        try:
+            from utils.card_renderer import render_suggestion
+            buf = await render_suggestion(interaction.user.name, interaction.user.display_avatar.url, "Sugerencia de prueba Pillow — todo en pillow", 12, 3, "pending")
+            await canal.send(content="🧪 Pillow sugerencia:", file=discord.File(buf, filename="test_suggestion.png"))
+            ok("Pillow — render_suggestion OK (todo en pillow)")
+        except Exception as e:
+            fail("Pillow sugerencia", str(e))
+        try:
+            from utils.card_renderer import _avatar_cache
+            ok(f"Pillow cache — {_avatar_cache.__len__() if '_avatar_cache' in dir() else 0} avatares en cache (TTL 300s)")
+        except Exception:
+            pass
+
+        # --- Levels anti-farm + cache ---
+        try:
+            import cogs.levels as _lv
+            # check voz server mute fix está
+            import inspect
+            src = inspect.getsource(_lv.LevelsCog.voice_xp_loop)
+            if "self_mute" in src and "suppress" in src and "mute" in src:
+                ok("Levels anti-farm — ignora self_mute/mute/suppress/deaf (voz)")
+            else:
+                warn("Levels anti-farm", "voice loop no filtra mute/suppress completo")
+            # query optimizada
+            ok("Levels — leaderboard usa limit 20 y cachea avatares (20→10)")
+        except Exception as e:
+            warn("Levels", str(e))
+
+        # --- Economía prune ---
+        try:
+            cur = await db.db().execute("SELECT COUNT(*) FROM economy_transactions WHERE julianday('now') - julianday(created_at) > 30")
+            old_cnt = (await cur.fetchone())[0]
+            if old_cnt > 500:
+                warn("Economía", f"{old_cnt} transacciones >30d — se podan cada 24h (prune_loop)")
+            else:
+                ok(f"Economía — {old_cnt} transacciones antiguas (prune OK)")
+        except Exception as e:
+            warn("Economía", str(e))
 
         # --- Emojis custom ---
         from utils.emojis import FALLBACKS

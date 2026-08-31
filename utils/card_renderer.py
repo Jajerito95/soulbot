@@ -6,8 +6,11 @@ import asyncio
 
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont
+import time as _time
 
 FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "fonts")
+_avatar_cache: dict[str, tuple[bytes, float]] = {}
+_AVATAR_TTL = 300
 FONT_BOLD = os.path.join(FONT_DIR, "Outfit-Bold.ttf")
 FONT_REGULAR = os.path.join(FONT_DIR, "Outfit-Regular.ttf")
 
@@ -39,9 +42,21 @@ def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
 
 
 async def _download(url: str) -> bytes:
-    async with aiohttp.ClientSession() as session:
+    # cache simple en memoria para no re-descargar el mismo avatar cada /lb
+    now = _time.time()
+    if url in _avatar_cache:
+        data, ts = _avatar_cache[url]
+        if now - ts < _AVATAR_TTL:
+            return data
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=20, limit_per_host=10)) as session:
         async with session.get(url) as resp:
-            return await resp.read()
+            data = await resp.read()
+            _avatar_cache[url] = (data, now)
+            # limpia cache si crece mucho
+            if len(_avatar_cache) > 200:
+                oldest = min(_avatar_cache, key=lambda k: _avatar_cache[k][1])
+                _avatar_cache.pop(oldest, None)
+            return data
 
 
 async def render_card(
@@ -525,6 +540,66 @@ async def render_profile(
     card.convert("RGB").save(buffer, format="PNG")
     buffer.seek(0)
     return buffer
+
+
+async def render_suggestion(
+    username: str,
+    avatar_url: str,
+    content: str,
+    yes: int,
+    no: int,
+    status: str,
+) -> io.BytesIO:
+    """Tarjeta Pillow para sugerencias — usada si quieres 'todo en pillow'."""
+    accent = {"pending": (88,101,242), "approved": (87,242,135), "denied": (237,66,69)}.get(status, (88,101,242))
+    BG = (30,33,36)
+    W, H = 800, 260
+    base = Image.new("RGBA", (W,H), BG + (255,))
+    bdraw = ImageDraw.Draw(base)
+    for y in range(H):
+        t=y/H
+        r=int(BG[0]*(1-t)+(BG[0]+10)*t); g=int(BG[1]*(1-t)+(BG[1]+10)*t); b=int(BG[2]*(1-t)+(BG[2]+12)*t)
+        bdraw.line([(0,y),(W,y)], fill=(r,g,b,255))
+    # barra lateral acento
+    bdraw.rectangle([0,0,8,H], fill=accent+(255,))
+    mask = Image.new("L", (W,H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0,0,W,H], radius=18, fill=255)
+    card = Image.new("RGBA", (W,H), (0,0,0,0))
+    card.paste(base, (0,0), mask)
+    draw = ImageDraw.Draw(card)
+    # avatar
+    try:
+        data = await _download(avatar_url)
+        av = Image.open(io.BytesIO(data)).convert("RGBA").resize((64,64), Image.LANCZOS)
+    except: av = Image.new("RGBA", (64,64), (80,80,80,255))
+    am = Image.new("L", (64,64), 0); ImageDraw.Draw(am).ellipse((0,0,64,64), fill=255)
+    card.paste(av, (24,24), am)
+    draw.ellipse((24,24,88,88), outline=(255,255,255,40), width=1)
+    font_b = ImageFont.truetype(FONT_BOLD, 20); font_r = ImageFont.truetype(FONT_REGULAR, 16); font_c = ImageFont.truetype(FONT_REGULAR, 18)
+    draw.text((104, 28), _clean(username)[:20], font=font_b, fill=(255,255,255,255))
+    status_lbl = {"pending":"PENDIENTE","approved":"APROBADA","denied":"DENEGADA"}.get(status,status.upper())
+    draw.rounded_rectangle([W-110, 24, W-24, 48], radius=10, fill=accent+(255,))
+    draw.text((W-67, 30), status_lbl, font=font_r, fill=(255,255,255,255), anchor="mm")
+    # contenido warp
+    max_w = W-48
+    words = _clean(content).split(); lines=[]; cur=""
+    for w in words:
+        test=(cur+" "+w).strip()
+        if draw.textlength(test, font=font_c) <= max_w:
+            cur=test
+        else:
+            if cur: lines.append(cur)
+            cur=w
+    if cur: lines.append(cur)
+    lines=lines[:4]
+    y=100
+    for ln in lines:
+        draw.text((24, y), ln, font=font_c, fill=(220,221,224,255))
+        y+=22
+    # votos
+    draw.text((24, H-36), f"🟢 {yes}  •  🔴 {no}", font=font_r, fill=(160,160,165,255))
+    draw.text((W-24, H-36), "SoulSeeker™", font=font_r, fill=(110,114,120,255), anchor="rm")
+    buf=io.BytesIO(); card.convert("RGB").save(buf, format="PNG"); buf.seek(0); return buf
 
 
 # Paleta de acentos por categoría (determinista por nombre, sin necesidad de guardar color en DB)

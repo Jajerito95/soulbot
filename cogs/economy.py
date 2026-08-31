@@ -4,7 +4,7 @@ from typing import Optional
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import database as db
 from utils.embeds import success_embed, error_embed, base_embed
@@ -31,6 +31,26 @@ def _seconds_to_human(seconds: int) -> str:
 class EconomyCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.prune_loop.start()
+
+    def cog_unload(self):
+        try: self.prune_loop.cancel()
+        except: pass
+
+    @tasks.loop(hours=24)
+    async def prune_loop(self):
+        # Poda transacciones >30d para no inflar la DB Turso
+        try:
+            await self.bot.wait_until_ready()
+            import database as db
+            await db.db().execute("DELETE FROM economy_transactions WHERE julianday('now') - julianday(created_at) > 30")
+            await db.db().commit()
+        except Exception:
+            pass
+
+    @prune_loop.before_loop
+    async def before_prune(self):
+        await self.bot.wait_until_ready()
 
     # ---------- comandos de miembro ----------
 

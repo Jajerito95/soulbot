@@ -175,7 +175,9 @@ class LevelsCog(commands.Cog):
                 for member in channel.members:
                     if member.bot:
                         continue
-                    if member.voice and (member.voice.self_deaf or member.voice.deaf):
+                    # anti-farm: no XP si está sordo/muteado/suprimido (server o self) o es AFK
+                    vs = member.voice
+                    if vs and (vs.self_deaf or vs.deaf or vs.mute or vs.self_mute or vs.suppress or vs.afk):
                         continue
                     result = await award_xp(guild, member, config["voice_xp_per_minute"])
                     if result["leveled_up"]:

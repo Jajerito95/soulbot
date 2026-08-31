@@ -191,6 +191,24 @@ class LogsCog(commands.Cog):
         await self._send(message.guild, "logs_messages", embed)
 
     @commands.Cog.listener()
+    async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent):
+        guild = self.bot.get_guild(payload.guild_id) if payload.guild_id else None
+        if not guild:
+            return
+        # ignora purges del propio bot si es bulk de su comando purge
+        count = len(payload.message_ids)
+        cached = payload.cached_messages
+        # si tenemos caché, filtra bots para no loguear spam
+        if cached:
+            count = len([m for m in cached if not m.author.bot])
+            if count == 0:
+                return
+        channel = guild.get_channel(payload.channel_id)
+        ch_mention = channel.mention if channel else f"<#{payload.channel_id}>"
+        embed = log_embed("🧹 Mensajes eliminados en masa", f"📍 Canal: {ch_mention}\n🗑️ Cantidad: **{count}**\n*Bulk delete (purge) — detalles individuales omitidos para evitar spam.*", color=COLOR_ERROR)
+        await self._send(guild, "logs_messages", embed)
+
+    @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
         if before.author.bot or not before.guild:
             return

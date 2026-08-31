@@ -273,6 +273,9 @@ async def init_db():
     tickets_cols = {row[1] for row in await (await _db.execute("PRAGMA table_info(tickets)")).fetchall()}
     if "claimed_at" not in tickets_cols:
         await _db.execute("ALTER TABLE tickets ADD COLUMN claimed_at TEXT")
+    if "last_activity" not in tickets_cols:
+        await _db.execute("ALTER TABLE tickets ADD COLUMN last_activity TEXT DEFAULT CURRENT_TIMESTAMP")
+        await _db.execute("UPDATE tickets SET last_activity = COALESCE(created_at, CURRENT_TIMESTAMP) WHERE last_activity IS NULL")
 
     await _db.commit()
 
@@ -406,11 +409,26 @@ async def remove_temp_ban(guild_id: int, user_id: int):
 
 async def create_ticket(guild_id: int, channel_id: int, user_id: int, category: str) -> int:
     cur = await _db.execute(
-        "INSERT INTO tickets (guild_id, channel_id, user_id, category) VALUES (?, ?, ?, ?)",
+        "INSERT INTO tickets (guild_id, channel_id, user_id, category, last_activity) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
         (guild_id, channel_id, user_id, category),
     )
     await _db.commit()
     return cur.lastrowid
+
+
+async def update_ticket_activity(channel_id: int):
+    await _db.execute("UPDATE tickets SET last_activity = CURRENT_TIMESTAMP WHERE channel_id = ?", (channel_id,))
+    await _db.commit()
+
+
+async def get_stale_tickets(hours: int = 48) -> list[dict]:
+    cur = await _db.execute(
+        "SELECT * FROM tickets WHERE status='open' AND julianday('now') - julianday(COALESCE(last_activity, created_at)) > ? / 24.0",
+        (hours,),
+    )
+    rows = await cur.fetchall()
+    cols = [d[0] for d in cur.description] if rows else []
+    return [dict(zip(cols, r)) for r in rows]
 
 
 async def get_ticket_by_channel(channel_id: int) -> Optional[dict]:

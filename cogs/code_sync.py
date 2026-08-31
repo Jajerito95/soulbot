@@ -70,10 +70,27 @@ def check_rcon_cooldown(discord_id: int, seconds: int = 10) -> bool:
     return True
 
 def is_public_rcon() -> bool:
-    # bore.pub es un túnel público sin cifrado: la contraseña viaja en texto plano.
-    # En producción debería ser 127.0.0.1 via VPN (Tailscale/WireGuard) o IP allowlist.
     host = (RCON_HOST or "").lower()
-    return "bore.pub" in host or "trycloudflare.com" in host or "localhost.run" in host
+    return "bore.pub" in host or "trycloudflare.com" in host or "localhost.run" in host or "playit.gg" in host
+
+def is_private_host(host: str) -> bool:
+    import ipaddress
+    h = (host or "").strip().lower()
+    if h in ("127.0.0.1", "localhost", "::1"):
+        return True
+    try:
+        ip = ipaddress.ip_address(h)
+        # Tailscale usa 100.64/10 CGNAT, también privado RFC1918 y loopback
+        return ip.is_private or ip.is_loopback or str(ip).startswith("100.")
+    except ValueError:
+        return False  # hostname -> no es IP privada
+
+def rcon_allowed() -> bool:
+    from config import RCON_ALLOW_PUBLIC
+    if is_public_rcon() and not RCON_ALLOW_PUBLIC:
+        log("RCON bloqueado: host público sin RCON_ALLOW_PUBLIC=1. Cambia a Tailscale 100.x.x.x")
+        return False
+    return True
 
 
 # ----------------------------- RCON ---------------------------------------
@@ -81,10 +98,14 @@ def rcon_command(cmd: str, host: str = RCON_HOST, port: int = RCON_PORT,
                  password: str = RCON_PASS, timeout: float = 5.0) -> Optional[str]:
     """Cliente RCON minimo (protocolo Minecraft). Devuelve la respuesta o None."""
     # Nunca loguear la contraseña
+    if not rcon_allowed():
+        return None
     if is_public_rcon():
-        log("RCON: AVISO usas bore.pub/túnel público — la contraseña viaja sin cifrado. Cambia a Tailscale/WireGuard en producción.")
+        log("RCON: AVISO usas bore.pub/túnel público — la contraseña viaja sin cifrado. Cambia a Tailscale 100.x.x.x en producción.")
+    elif not is_private_host(host):
+        log(f"RCON: host {host} no es IP privada/Tailscale — verifica firewall. Usa 100.x.x.x.")
     # Sanitizar comando: solo permitir chars seguros (evita inyección ; && etc.)
-    if ";" in cmd or "&&" in cmd or "||" in cmd or "\n" in cmd:
+    if ";" in cmd or "&&" in cmd or "||" in cmd or "\n" in cmd or "`" in cmd or "$(" in cmd:
         log(f"RCON: comando bloqueado por caracteres inseguros: {cmd[:60]}")
         return None
     try:

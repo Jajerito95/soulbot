@@ -40,9 +40,12 @@ PUBLIC_URL = os.getenv("PUBLIC_URL", f"http://localhost:{PORT}")
 
 # ---------------- Vinculacion Minecraft <-> Discord (/code) ----------------
 # RCON del servidor de Minecraft (para aplicar roles con /role adduser)
+# PRODUCCIÓN: Usa Tailscale (100.x.x.x) o WireGuard. Ej: RCON_HOST=100.64.12.5
+# bore.pub / trycloudflare.com / localhost.run son SOLO para pruebas locales — van sin cifrado y la PASS viaja en claro.
 RCON_HOST = os.getenv("RCON_HOST", "127.0.0.1")
 RCON_PORT = int(os.getenv("RCON_PORT", "25575"))
 RCON_PASS = os.getenv("RCON_PASS", "")
+RCON_ALLOW_PUBLIC = os.getenv("RCON_ALLOW_PUBLIC", "0") == "1"  # pon 1 solo si sabes lo que haces
 
 # Postgres de Soulguard (donde se guardan los codigos de vinculacion)
 POSTGRES_URL = os.getenv("POSTGRES_URL", "")

@@ -1,16 +1,20 @@
 from __future__ import annotations
 import json
 import asyncio
+import time
 from typing import Optional
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import database as db
 from utils.embeds import success_embed, error_embed, base_embed, get_footer_icon
 from utils.transcripts import generate_transcript
 from config import COLOR, COLOR_ERROR, PUBLIC_URL
+
+_ticket_cooldown: dict[int, float] = {}
+_FCREATE_COOLDOWN: dict[int, float] = {}
 
 
 def parse_emoji(emoji_str: str):
@@ -114,6 +118,14 @@ async def _is_staff(interaction: discord.Interaction) -> bool:
 async def open_or_queue_ticket(interaction: discord.Interaction, category: str):
     guild = interaction.guild
     config = await db.get_guild_config(guild.id)
+
+    # cooldown 60s anti-spam panel
+    now = time.time()
+    last = _ticket_cooldown.get(interaction.user.id, 0)
+    if now - last < 60:
+        await interaction.response.send_message(embed=error_embed(f"Espera {int(60-(now-last))}s antes de abrir otro ticket (anti-spam)."), ephemeral=True)
+        return
+    _ticket_cooldown[interaction.user.id] = now
 
     existing = await db.get_open_ticket_for_user(guild.id, interaction.user.id)
     if existing:
@@ -276,6 +288,72 @@ async def do_close(interaction: discord.Interaction, reason: str):
 class TicketsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.auto_close_loop.start()
+
+    def cog_unload(self):
+        try:
+            self.auto_close_loop.cancel()
+        except Exception:
+            pass
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot or not message.guild:
+            return
+        try:
+            t = await db.get_ticket_by_channel(message.channel.id)
+            if t and t["status"] == "open":
+                await db.update_ticket_activity(message.channel.id)
+        except Exception:
+            pass
+
+    @tasks.loop(hours=6)
+    async def auto_close_loop(self):
+        # Cierra tickets inactivos 48h (anti-acumulación)
+        try:
+            stale = await db.get_stale_tickets(48)
+            for t in stale[:10]:
+                guild = self.bot.get_guild(t["guild_id"])
+                if not guild:
+                    await db.close_ticket(t["channel_id"])
+                    continue
+                channel = guild.get_channel(t["channel_id"])
+                # genera transcript si existe canal
+                try:
+                    if channel:
+                        path = await generate_transcript(channel)  # type: ignore
+                        config = await db.get_guild_config(guild.id)
+                        if config.get("tickets_log_channel_id"):
+                            log_ch = guild.get_channel(config["tickets_log_channel_id"])
+                            if log_ch:
+                                url = f"{PUBLIC_URL}/transcripts/{t['channel_id']}.html"
+                                emb = base_embed(f"👤 <@{t['user_id']}> • 📂 {t['category']} • auto-cierre 48h inactividad\n🔗 [Transcript]({url})", COLOR_ERROR, title="🔒 Ticket auto-cerrado")
+                                await log_ch.send(embed=emb, file=discord.File(path))
+                        await db.close_ticket(t["channel_id"])
+                        try: await channel.delete(reason="Auto-close 48h inactividad")  # type: ignore
+                        except Exception: pass
+                    else:
+                        await db.close_ticket(t["channel_id"])
+                except Exception:
+                    continue
+                # atiende cola tras cerrar
+                try:
+                    config = await db.get_guild_config(t["guild_id"])
+                    entry = await db.pop_queue(t["guild_id"])
+                    if entry and guild:
+                        member = guild.get_member(entry["user_id"])
+                        if member:
+                            nc = await _create_ticket_channel(guild, member, entry["category"], config)
+                            try: await member.send(f"🎫 Tu ticket ya está listo: {nc.jump_url}")
+                            except discord.Forbidden: pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    @auto_close_loop.before_loop
+    async def before_auto_close(self):
+        await self.bot.wait_until_ready()
 
     async def cog_load(self):
         # Vista persistente genérica: debe registrarse siempre, sin depender de bot.guilds
@@ -349,6 +427,13 @@ class TicketsCog(commands.Cog):
     @ticket_group.command(name="fcreate", description="Crea un ticket rápido sin ping (fast)")
     @app_commands.describe(categoria="Categoría (opcional, usa la primera por defecto)", usuario="Usuario para el que crear (solo Staff, opcional)")
     async def fcreate(self, interaction: discord.Interaction, categoria: str | None = None, usuario: discord.Member | None = None):
+        # cooldown 30s anti-spam fcreate
+        now = time.time()
+        last = _FCREATE_COOLDOWN.get(interaction.user.id, 0)
+        if now - last < 30:
+            await interaction.response.send_message(embed=error_embed(f"Espera {int(30-(now-last))}s antes de otro fcreate."), ephemeral=True)
+            return
+        _FCREATE_COOLDOWN[interaction.user.id] = now
         # Fast path: sin ping, sin cola si es fcreate (bypass pausado/max), sin mención ruidosa
         guild = interaction.guild
         config = await db.get_guild_config(guild.id)

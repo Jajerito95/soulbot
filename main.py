@@ -31,9 +31,19 @@ class SoulBot(commands.Bot):
         else:
             log.warning("DB: SQLite LOCAL (se PIERDE en cada redeploy de Render Free). "
                         "Define TURSO_DATABASE_URL y TURSO_AUTH_TOKEN para no perder datos.")
+        # Seguridad: advierte si RCON es público
+        try:
+            from config import RCON_HOST
+            if RCON_HOST and ("bore.pub" in RCON_HOST or "trycloudflare" in RCON_HOST):
+                log.warning("RCON usa túnel público bore.pub — cambia a Tailscale 100.x.x.x para cifrado.")
+        except Exception:
+            pass
         for cog in COGS:
-            await self.load_extension(cog)
-            log.info(f"Cog cargado: {cog}")
+            try:
+                await self.load_extension(cog)
+                log.info(f"Cog cargado: {cog}")
+            except Exception as e:
+                log.exception(f"Fallo al cargar {cog}: {e} — el bot sigue sin ese módulo")
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
             self.tree.copy_global_to(guild=guild)
@@ -47,14 +57,62 @@ class SoulBot(commands.Bot):
 bot = SoulBot()
 
 import discord.app_commands as app_commands
+from utils.embeds import error_embed as _err_embed
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error):
-    # 10062 = interaccion caducada (Discord la mato por timeout). No es un error
-    # de logica, solo latencia/arranque; lo ignoramos para no romper el flujo.
+    # Interacción caducada (10062) — latencia, la ignoramos
     if isinstance(error, app_commands.CommandInvokeError) and isinstance(error.original, discord.NotFound):
         return
-    log.exception("Error en comando slash: %s", error)
+    # Permisos faltantes
+    orig = error.original if isinstance(error, app_commands.CommandInvokeError) else error
+    if isinstance(orig, discord.Forbidden):
+        log.warning(f"Permisos insuficientes en {interaction.command}: {orig}")
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(embed=_err_embed("Sin permisos", "No tengo permisos para hacer eso. Revisa mis permisos y jerarquía."), ephemeral=True)
+            else:
+                await interaction.followup.send(embed=_err_embed("Sin permisos", "No tengo permisos para hacer eso."), ephemeral=True)
+        except Exception:
+            pass
+        return
+    if isinstance(orig, app_commands.CheckFailure):
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(embed=_err_embed("No autorizado", "No tienes permisos para usar este comando."), ephemeral=True)
+            else:
+                await interaction.followup.send(embed=_err_embed("No autorizado", "No tienes permisos."), ephemeral=True)
+        except Exception:
+            pass
+        return
+    if isinstance(orig, app_commands.CommandOnCooldown):
+        try:
+            await interaction.response.send_message(embed=_err_embed("Cooldown", f"Espera {orig.retry_after:.1f}s antes de reutilizar."), ephemeral=True)
+        except Exception:
+            pass
+        return
+    # Cooldown genérico y otros
+    # Para cualquier error no manejado, notifica al usuario sin crashear el bot
+    log.exception("Error en comando slash %s: %s", getattr(interaction.command, 'name', '?'), error)
+    try:
+        msg = f"```{str(orig)[:400]}```" if orig else f"```{str(error)[:400]}```"
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=_err_embed("Error interno", f"Ocurrió un error inesperado.\n{msg}"), ephemeral=True)
+        else:
+            await interaction.followup.send(embed=_err_embed("Error interno", f"Ocurrió un error.\n{msg}"), ephemeral=True)
+    except Exception:
+        pass
+
+# Anti-crash global: captura excepciones no manejadas en tasks
+import asyncio
+def _handle_task_exception(loop, context):
+    msg = context.get("exception")
+    log.error(f"Task exception: {msg} — {context.get('message')}")
+
+try:
+    asyncio.get_event_loop().set_exception_handler(_handle_task_exception)
+except RuntimeError:
+    pass
 
 
 @bot.event
