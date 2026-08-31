@@ -420,24 +420,49 @@ async def remove_temp_ban(guild_id: int, user_id: int):
 # ---------- tickets ----------
 
 async def create_ticket(guild_id: int, channel_id: int, user_id: int, category: str) -> int:
-    cur = await _db.execute(
-        "INSERT INTO tickets (guild_id, channel_id, user_id, category, last_activity) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
-        (guild_id, channel_id, user_id, category),
-    )
+    try:
+        cur = await _db.execute(
+            "INSERT INTO tickets (guild_id, channel_id, user_id, category, last_activity) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            (guild_id, channel_id, user_id, category),
+        )
+    except Exception as e:
+        if "no column" in str(e).lower() and "last_activity" in str(e).lower():
+            # fallback si la migración aún no ha llegado a Turso
+            cur = await _db.execute(
+                "INSERT INTO tickets (guild_id, channel_id, user_id, category) VALUES (?, ?, ?, ?)",
+                (guild_id, channel_id, user_id, category),
+            )
+        else:
+            raise
     await _db.commit()
     return cur.lastrowid
 
 
 async def update_ticket_activity(channel_id: int):
-    await _db.execute("UPDATE tickets SET last_activity = CURRENT_TIMESTAMP WHERE channel_id = ?", (channel_id,))
-    await _db.commit()
+    try:
+        await _db.execute("UPDATE tickets SET last_activity = CURRENT_TIMESTAMP WHERE channel_id = ?", (channel_id,))
+        await _db.commit()
+    except Exception as e:
+        if "no column" in str(e).lower() and "last_activity" in str(e).lower():
+            # columna aún no existe en remoto — ignora, get_stale usa COALESCE
+            return
+        raise
 
 
 async def get_stale_tickets(hours: int = 48) -> list[dict]:
-    cur = await _db.execute(
-        "SELECT * FROM tickets WHERE status='open' AND julianday('now') - julianday(COALESCE(last_activity, created_at)) > ? / 24.0",
-        (hours,),
-    )
+    try:
+        cur = await _db.execute(
+            "SELECT * FROM tickets WHERE status='open' AND julianday('now') - julianday(COALESCE(last_activity, created_at)) > ? / 24.0",
+            (hours,),
+        )
+    except Exception as e:
+        if "no column" in str(e).lower() and "last_activity" in str(e).lower():
+            cur = await _db.execute(
+                "SELECT * FROM tickets WHERE status='open' AND julianday('now') - julianday(created_at) > ? / 24.0",
+                (hours,),
+            )
+        else:
+            raise
     rows = await cur.fetchall()
     cols = [d[0] for d in cur.description] if rows else []
     return [dict(zip(cols, r)) for r in rows]
