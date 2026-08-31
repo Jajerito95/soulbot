@@ -252,6 +252,26 @@ class SetupCog(commands.Cog):
             ephemeral=True,
         )
 
+    @setup_group.command(name="colors", description="Configura el canal de colores uwu y envía el panel")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(canal="Canal donde se enviará el panel de colores", enviar_panel="Envía el panel ahora")
+    async def setup_colors(self, interaction: discord.Interaction, canal: Optional[discord.TextChannel] = None, enviar_panel: Optional[bool] = None):
+        if canal is not None:
+            await update_guild_config(interaction.guild_id, color_panel_channel_id=canal.id)
+        config = await get_guild_config(interaction.guild_id)
+        if enviar_panel:
+            target = canal or (interaction.guild.get_channel(config.get("color_panel_channel_id")) if config.get("color_panel_channel_id") else None)
+            if not target:
+                await interaction.response.send_message(embed=error_embed("Configura primero el canal de colores."), ephemeral=True)
+                return
+            from cogs.colors import ensure_color_roles, build_color_embed, ColorPanelView
+            await ensure_color_roles(interaction.guild)
+            await target.send(embed=build_color_embed(interaction.guild), view=ColorPanelView())
+            await interaction.response.send_message(embed=success_embed(f"Panel de colores enviado en {target.mention}"), ephemeral=True)
+            return
+        canal_txt = f"<#{config.get('color_panel_channel_id')}>" if config.get("color_panel_channel_id") else "No configurado"
+        await interaction.response.send_message(embed=success_embed(f"🎨 Canal colores: {canal_txt}"), ephemeral=True)
+
     @setup_group.command(name="levels", description="Configura el canal de anuncios de subida de nivel")
     @app_commands.checks.has_permissions(manage_guild=True)
     @app_commands.describe(canal="Canal donde se anuncian las subidas de nivel (vacío = mismo canal del mensaje)")
