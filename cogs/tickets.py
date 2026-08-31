@@ -129,10 +129,18 @@ async def open_or_queue_ticket(interaction: discord.Interaction, category: str):
 
     existing = await db.get_open_ticket_for_user(guild.id, interaction.user.id)
     if existing:
-        await interaction.response.send_message(
-            embed=error_embed(f"Ya tienes un ticket abierto: <#{existing['channel_id']}>"), ephemeral=True
-        )
-        return
+        # Si el canal ya no existe (borrado manual), limpia el registro y deja abrir uno nuevo
+        ch = guild.get_channel(existing['channel_id'])
+        if ch is None:
+            try:
+                await db.close_ticket(existing['channel_id'])
+            except Exception:
+                pass
+        else:
+            await interaction.response.send_message(
+                embed=error_embed(f"Ya tienes un ticket abierto: <#{existing['channel_id']}>"), ephemeral=True
+            )
+            return
 
     open_count = await db.count_open_tickets(guild.id)
     if config["tickets_paused"] or open_count >= config["tickets_max_active"]:
@@ -307,6 +315,16 @@ class TicketsCog(commands.Cog):
         except Exception:
             pass
 
+    @commands.Cog.listener()
+    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        # Si borran el canal manualmente (no con /ticket close), cierra el registro para no bloquear futuros tickets
+        try:
+            t = await db.get_ticket_by_channel(channel.id)
+            if t and t["status"] == "open":
+                await db.close_ticket(channel.id)
+        except Exception:
+            pass
+
     @tasks.loop(hours=6)
     async def auto_close_loop(self):
         # Cierra tickets inactivos 48h (anti-acumulación)
@@ -448,8 +466,15 @@ class TicketsCog(commands.Cog):
         # si ya tiene ticket abierto
         existing = await db.get_open_ticket_for_user(guild.id, target.id)
         if existing:
-            await interaction.response.send_message(embed=error_embed(f"{target.mention} ya tiene un ticket abierto: <#{existing['channel_id']}>"), ephemeral=True)
-            return
+            ch = guild.get_channel(existing['channel_id'])
+            if ch is None:
+                try:
+                    await db.close_ticket(existing['channel_id'])
+                except Exception:
+                    pass
+            else:
+                await interaction.response.send_message(embed=error_embed(f"{target.mention} ya tiene un ticket abierto: <#{existing['channel_id']}>"), ephemeral=True)
+                return
 
         # categoría: la solicitada, o la primera disponible de la config
         cat_label = categoria.strip() if categoria else None

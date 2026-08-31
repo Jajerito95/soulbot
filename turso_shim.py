@@ -32,8 +32,10 @@ class _CursorWrapper:
 
 
 class TursoConnection:
-    def __init__(self, conn):
+    def __init__(self, conn, url: str | None = None, auth_token: str | None = None):
         self._conn = conn
+        self._url = url
+        self._auth = auth_token
 
     @staticmethod
     def _safe_params(params):
@@ -49,9 +51,33 @@ class TursoConnection:
         """
         return tuple(str(p) if isinstance(p, (int, bool)) else p for p in params)
 
+    async def _reconnect(self):
+        if not self._url or not self._auth:
+            return
+        try:
+            new_conn = await asyncio.to_thread(libsql.connect, database=self._url, auth_token=self._auth)
+            self._conn = new_conn
+        except Exception:
+            pass
+
     async def execute(self, sql: str, params=()) -> _CursorWrapper:
-        cursor = await asyncio.to_thread(self._conn.execute, sql, self._safe_params(params))
-        return _CursorWrapper(cursor)
+        try:
+            cursor = await asyncio.to_thread(self._conn.execute, sql, self._safe_params(params))
+            return _CursorWrapper(cursor)
+        except ValueError as e:
+            # Turso stream expirado (404 stream not found) — reconecta y reintenta 1 vez
+            if "stream not found" in str(e).lower() or "stream_not_found" in str(e).lower():
+                await self._reconnect()
+                cursor = await asyncio.to_thread(self._conn.execute, sql, self._safe_params(params))
+                return _CursorWrapper(cursor)
+            raise
+        except Exception as e:
+            # libsql a veces envuelve el error como Hrana api error con stream not found
+            if "stream not found" in str(e).lower():
+                await self._reconnect()
+                cursor = await asyncio.to_thread(self._conn.execute, sql, self._safe_params(params))
+                return _CursorWrapper(cursor)
+            raise
 
     async def executescript(self, script: str):
         # libsql sigue el modelo de sqlite3: separamos por ';' y ejecutamos una a una
@@ -62,7 +88,20 @@ class TursoConnection:
         await self.commit()
 
     async def commit(self):
-        await asyncio.to_thread(self._conn.commit)
+        try:
+            await asyncio.to_thread(self._conn.commit)
+        except ValueError as e:
+            if "stream not found" in str(e).lower():
+                await self._reconnect()
+                await asyncio.to_thread(self._conn.commit)
+            else:
+                raise
+        except Exception as e:
+            if "stream not found" in str(e).lower():
+                await self._reconnect()
+                await asyncio.to_thread(self._conn.commit)
+            else:
+                raise
 
     async def close(self):
         await asyncio.to_thread(self._conn.close)
@@ -70,4 +109,4 @@ class TursoConnection:
 
 async def connect(url: str, auth_token: str) -> TursoConnection:
     conn = await asyncio.to_thread(libsql.connect, database=url, auth_token=auth_token)
-    return TursoConnection(conn)
+    return TursoConnection(conn, url, auth_token)
