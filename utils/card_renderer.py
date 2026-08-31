@@ -110,14 +110,15 @@ async def render_card(
 
     # username truncado para no invadir overlay
     clean_name = _clean(username)[:18]
+    def _f(n): return f"{int(n):,}".replace(",", ".")
     # sombra texto username
     draw.text((223, 79), f"@{clean_name}", font=font_name, fill=(0,0,0,90))
     draw.text((222, 78), f"@{clean_name}", font=font_name, fill=(255, 255, 255, 255))
-    stats_text = f"Nivel: {level} \u2022 XP: {xp_current}/{xp_needed} \u2022 Rank: #{rank}"
+    stats_text = f"Nivel: {level} \u2022 XP: {_f(xp_current)}/{_f(xp_needed)} \u2022 Rank: #{rank}"
     draw.text((223, 139), stats_text, font=font_stats, fill=(0,0,0,60))
     draw.text((222, 138), stats_text, font=font_stats, fill=accent + (255,))
     if total_xp is not None:
-        total_str = f"{total_xp:,}".replace(",", ".")
+        total_str = _f(total_xp)
         draw.text((222, 166), f"XP Total: {total_str}", font=font_small, fill=(200, 203, 208, 255))
 
     # badge rank top-right (evita overlay también)

@@ -17,6 +17,18 @@ MESSAGE_COOLDOWN = 30  # segundos (valor por defecto, configurable con /setup ra
 MESSAGE_XP_RANGE = (25, 75)
 VOICE_XP_PER_MINUTE = 50
 
+def _fmt(n: int) -> str:
+    """Formato bonito español: 115323 -> 115.323"""
+    return f"{int(n):,}".replace(",", ".")
+def _fmt_compact(n: int) -> str:
+    if n >= 1_000_000:
+        s = f"{n/1_000_000:.1f}M"
+        return s.replace(".", ",").replace(",0M","M")
+    if n >= 10_000:
+        s = f"{n/1_000:.1f}K"
+        return s.replace(".", ",").replace(",0K","K")
+    return _fmt(n)
+
 
 class LeaderboardView(discord.ui.View):
     """Botones de Pillow para cambiar periodo del leaderboard sin re-ejecutar el comando."""
@@ -67,9 +79,9 @@ class LeaderboardView(discord.ui.View):
             if periodo == "alltime":
                 xp, level = row[1], row[2]
                 _, xp_in, xp_need = level_from_xp(xp)
-                entries.append({"username": member.name, "avatar_url": member.display_avatar.url, "stat_text": f"Nivel {level} \u2022 {xp} XP", "ratio": xp_in / xp_need if xp_need else 0})
+                entries.append({"username": member.name, "avatar_url": member.display_avatar.url, "stat_text": f"Nivel {level} \u2022 {_fmt(xp)} XP", "ratio": xp_in / xp_need if xp_need else 0})
             else:
-                entries.append({"username": member.name, "avatar_url": member.display_avatar.url, "stat_text": f"+{row[1]} XP", "ratio": None})
+                entries.append({"username": member.name, "avatar_url": member.display_avatar.url, "stat_text": f"+{_fmt(row[1])} XP", "ratio": None})
             if len(entries) >= 10:
                 break
         if not entries:
@@ -301,13 +313,13 @@ class LevelsCog(commands.Cog):
                 _, xp_in_level, xp_needed = level_from_xp(xp)
                 entries.append({
                     "username": member.name, "avatar_url": member.display_avatar.url,
-                    "stat_text": f"Nivel {level} • {xp} XP", "ratio": xp_in_level / xp_needed if xp_needed else 0,
+                    "stat_text": f"Nivel {level} • {_fmt(xp)} XP", "ratio": xp_in_level / xp_needed if xp_needed else 0,
                 })
             else:
                 gained = row[1]
                 entries.append({
                     "username": member.name, "avatar_url": member.display_avatar.url,
-                    "stat_text": f"+{gained} XP", "ratio": None,
+                    "stat_text": f"+{_fmt(gained)} XP", "ratio": None,
                 })
 
             # Mostrar siempre 10 (los usuarios que salieron del server se omiten,

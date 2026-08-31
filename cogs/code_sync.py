@@ -47,14 +47,50 @@ def strip_codes(text: str) -> str:
     return re.sub(r"[§&][0-9a-fk-or]", "", text or "", flags=re.IGNORECASE)
 
 
+# ── Seguridad RCON ──────────────────────────────────────
+_MCNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,16}$")
+_MCROLE_RE = re.compile(r"^[A-Za-z0-9_ ]{1,32}$")
+_RCON_LAST: dict[int, float] = {}  # discord_id -> timestamp
+
+def sanitize_mcname(name: str) -> str | None:
+    name = (name or "").strip()
+    return name if _MCNAME_RE.match(name) else None
+
+def sanitize_mcrole(role: str) -> str | None:
+    # roles de Soulrole vienen en minúsculas con espacios (ej. "leyenda soulseeker")
+    r = (role or "").strip().lower()
+    return r if _MCROLE_RE.match(r) else None
+
+def check_rcon_cooldown(discord_id: int, seconds: int = 10) -> bool:
+    now = time.time()
+    last = _RCON_LAST.get(discord_id, 0)
+    if now - last < seconds:
+        return False
+    _RCON_LAST[discord_id] = now
+    return True
+
+def is_public_rcon() -> bool:
+    # bore.pub es un túnel público sin cifrado: la contraseña viaja en texto plano.
+    # En producción debería ser 127.0.0.1 via VPN (Tailscale/WireGuard) o IP allowlist.
+    host = (RCON_HOST or "").lower()
+    return "bore.pub" in host or "trycloudflare.com" in host or "localhost.run" in host
+
+
 # ----------------------------- RCON ---------------------------------------
 def rcon_command(cmd: str, host: str = RCON_HOST, port: int = RCON_PORT,
                  password: str = RCON_PASS, timeout: float = 5.0) -> Optional[str]:
     """Cliente RCON minimo (protocolo Minecraft). Devuelve la respuesta o None."""
+    # Nunca loguear la contraseña
+    if is_public_rcon():
+        log("RCON: AVISO usas bore.pub/túnel público — la contraseña viaja sin cifrado. Cambia a Tailscale/WireGuard en producción.")
+    # Sanitizar comando: solo permitir chars seguros (evita inyección ; && etc.)
+    if ";" in cmd or "&&" in cmd or "||" in cmd or "\n" in cmd:
+        log(f"RCON: comando bloqueado por caracteres inseguros: {cmd[:60]}")
+        return None
     try:
         s = socket.create_connection((host, port), timeout=timeout)
     except OSError as e:
-        log(f"RCON: no se pudo conectar: {e}")
+        log(f"RCON: no se pudo conectar a {host}:{port} — {e}")
         return None
 
     def packet(req_id: int, ptype: int, body: str) -> bytes:
@@ -301,31 +337,46 @@ class CodeSyncCog(commands.Cog):
     @app_commands.command(name="code", description="Vincula tu cuenta de Minecraft con el codigo de /code")
     @app_commands.describe(codigo="El codigo de 6 digitos que te dio el servidor en Minecraft")
     async def code(self, interaction: discord.Interaction, codigo: str):
+        # rate-limit 10s por usuario para no spamear RCON/Postgres
+        if not check_rcon_cooldown(interaction.user.id, 10):
+            await interaction.response.send_message(embed=error_embed("Espera unos segundos", "Estás ejecutando /code muy rápido. Prueba en 10s."), ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
+        codigo = (codigo or "").strip().upper()
+        if not re.match(r"^[A-Z0-9]{6,8}$", codigo):
+            await interaction.followup.send(embed=error_embed("Código inválido", "Debe ser de 6-8 caracteres alfanuméricos (ej. `AB12CD`)."))
+            return
         try:
-            link = await asyncio.to_thread(fetch_link, codigo.strip())
+            link = await asyncio.to_thread(fetch_link, codigo)
         except Exception:
             link = None
         if not link:
             await interaction.followup.send(embed=error_embed(
                 "Codigo invalido", "Ese codigo no existe o ya caduco (10 min). Usa /code en Minecraft para generar uno."))
             return
-        if not await asyncio.to_thread(bind_link, codigo.strip(), str(interaction.user.id)):
+        if not await asyncio.to_thread(bind_link, codigo, str(interaction.user.id)):
             await interaction.followup.send(embed=error_embed(
                 "Error", "No pude guardar la vinculacion en la base de datos."))
             return
 
-        mcname = link["mcname"] or link["uuid"]
+        raw_name = link["mcname"] or link["uuid"] or ""
+        mcname = sanitize_mcname(raw_name)
+        if not mcname:
+            await interaction.followup.send(embed=error_embed("Nombre de Minecraft inválido", f"`{raw_name[:20]}` no parece un nick válido. Contacta staff."))
+            return
         mc_roles_list = await asyncio.to_thread(mc_roles, mcname)
         member = interaction.user
         dc_role_ids = {str(r.id) for r in member.roles}
 
         added_mc = []
         added_dc = []
-        # DC -> MC
+        # DC -> MC (con sanitización)
         for dcid, mcrole in DC_ROLE_TO_MC.items():
-            if dcid in dc_role_ids and mcrole.lower() not in mc_roles_list:
-                resp = await asyncio.to_thread(rcon_command, f"role adduser {mcname} {mcrole}")
+            sm = sanitize_mcrole(mcrole)
+            if not sm:
+                continue
+            if dcid in dc_role_ids and sm not in mc_roles_list:
+                resp = await asyncio.to_thread(rcon_command, f"role adduser {mcname} {sm}")
                 if resp is not None:
                     added_mc.append(mcrole)
         # MC -> DC
