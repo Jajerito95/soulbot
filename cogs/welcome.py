@@ -15,6 +15,12 @@ DEFAULT_WELCOME = (
     "y sé bienvenido a nuestra comunidad.\n\n"
     "👥 **Miembros totales:** `{member_count}`"
 )
+DEFAULT_FAREWELL = (
+    "👋 **¡Hasta pronto!**\n\n"
+    "😢 **{user}** ha abandonado **SoulSeeker™**.\n"
+    "Esperamos verte de nuevo pronto.\n\n"
+    "👥 **Miembros restantes:** `{member_count}`"
+)
 
 
 def build_welcome_embed(member: discord.Member, template: str) -> discord.Embed:
@@ -27,10 +33,28 @@ def build_welcome_embed(member: discord.Member, template: str) -> discord.Embed:
     from utils.emojis import emoji
     embed.set_author(name=f"{emoji(member.guild, 'wave')} ¡Bienvenido al servidor, {member.display_name}!")
     embed.set_thumbnail(url=member.display_avatar.url)
-    embed.add_field(name="🆔 Usuario", value=member.mention, inline=True)
+    embed.add_field(name="🆔 Usuario", value=f"{member.mention} (`{member.display_name}`)", inline=True)
     embed.add_field(name="👥 Miembros totales", value=f"`{member.guild.member_count}`", inline=True)
     embed.timestamp = discord.utils.utcnow()
     embed.set_footer(text="SoulBot System", icon_url=get_footer_icon())
+    return embed
+
+
+def build_farewell_embed(member: discord.Member, template: str) -> discord.Embed:
+    # Usa display_name directo para que no quede "Usuario-Desconocido" si el @ caduca
+    text = template.format(
+        mention=f"@{member.display_name}",
+        user=member.display_name,
+        member_count=member.guild.member_count,
+    )
+    embed = discord.Embed(description=text, color=COLOR)
+    from utils.emojis import emoji
+    embed.set_author(name=f"{emoji(member.guild, 'wave')} ¡Hasta pronto, {member.display_name}!")
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.add_field(name="🆔 Usuario", value=f"`{member.display_name}` ({member.id})", inline=True)
+    embed.add_field(name="👥 Miembros restantes", value=f"`{member.guild.member_count}`", inline=True)
+    embed.timestamp = discord.utils.utcnow()
+    embed.set_footer(text="SoulBot System • Despedida", icon_url=get_footer_icon())
     return embed
 
 
@@ -107,6 +131,50 @@ class WelcomeCog(commands.Cog):
             await channel.send(content=member.mention, embed=embed, file=file)
         except Exception:
             await channel.send(content=member.mention, embed=embed)
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        # Despedida — usa nombre directo, no solo @ para evitar Usuario-Desconocido
+        config = await get_guild_config(member.guild.id)
+        # actualiza contador de invites (left)
+        try:
+            await db().execute(
+                "UPDATE invites SET left_count = left_count + 1 WHERE guild_id = ? AND user_id IN (SELECT user_id FROM invites WHERE guild_id = ?)",
+                (member.guild.id, member.guild.id),
+            )
+            # intenta detectar quién invitó (no perfecto, pero mejor que nada)
+            inviter = None
+            try:
+                new_inv = await member.guild.invites()
+                old = self.invite_cache.get(member.guild.id, {})
+                # no fiable 100% en leave, pero mantenemos cache
+                self.invite_cache[member.guild.id] = {inv.code: inv.uses or 0 for inv in new_inv}
+            except Exception:
+                pass
+            await db().commit()
+        except Exception:
+            pass
+        if not config.get("farewell_enabled") or not config.get("farewell_channel_id"):
+            return
+        channel = member.guild.get_channel(config["farewell_channel_id"])
+        if channel is None:
+            return
+        template = config.get("farewell_message") or DEFAULT_FAREWELL
+        embed = build_farewell_embed(member, template)
+        try:
+            from utils.card_renderer import render_welcome  # reutiliza estilo bienvenida pero con texto despedida
+            buf = await render_welcome(
+                member.display_name,
+                member.display_avatar.url,
+                f"Adiós de {member.guild.name}",
+                member.guild.icon.url if member.guild.icon else None,
+                member.guild.member_count,
+            )
+            file = discord.File(buf, filename="farewell.png")
+            embed.set_image(url="attachment://farewell.png")
+            await channel.send(embed=embed, file=file)
+        except Exception:
+            await channel.send(embed=embed)
 
     invites_group = app_commands.Group(name="invites", description="Sistema de invitaciones")
 

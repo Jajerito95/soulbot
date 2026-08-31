@@ -53,6 +53,37 @@ class SetupCog(commands.Cog):
             ephemeral=True,
         )
 
+    @setup_group.command(name="farewell", description="Configura el sistema de despedidas")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(
+        canal_despedida="Canal donde se enviarán las despedidas",
+        mensaje="Mensaje de despedida (usa {mention}, {user}, {member_count})",
+        activo="Activar o desactivar",
+    )
+    async def setup_farewell(
+        self,
+        interaction: discord.Interaction,
+        canal_despedida: Optional[discord.TextChannel] = None,
+        mensaje: Optional[str] = None,
+        activo: Optional[bool] = None,
+    ):
+        fields = {}
+        if canal_despedida is not None:
+            fields["farewell_channel_id"] = canal_despedida.id
+        if mensaje is not None:
+            fields["farewell_message"] = mensaje
+        if activo is not None:
+            fields["farewell_enabled"] = int(activo)
+        if fields:
+            await update_guild_config(interaction.guild_id, **fields)
+        config = await get_guild_config(interaction.guild_id)
+        canal = f"<#{config['farewell_channel_id']}>" if config.get("farewell_channel_id") else "No configurado"
+        estado = "✅ Activado" if config.get("farewell_enabled") else "❌ Desactivado"
+        await interaction.response.send_message(
+            embed=success_embed(f"📢 Canal: {canal}\n⚙️ Estado: {estado}", title="👋 Configuración de despedidas"),
+            ephemeral=True,
+        )
+
     @setup_group.command(name="suggestion", description="Configura el sistema de sugerencias")
     @app_commands.checks.has_permissions(manage_guild=True)
     @app_commands.describe(

@@ -33,13 +33,26 @@ class SuggestionView(discord.ui.View):
 
     async def _get_suggestion(self, message_id: int):
         cur = await db().execute(
-            "SELECT content, author_id, status, yes_votes, no_votes FROM suggestions WHERE message_id = ?",
+            "SELECT content, author_id, author_name, status, yes_votes, no_votes FROM suggestions WHERE message_id = ?",
             (message_id,),
         )
         return await cur.fetchone()
 
     async def _refresh(self, interaction, status, yes, no, content, author_id):
-        author = interaction.guild.get_member(author_id) or interaction.user
+        # intenta resolver nombre guardado para no mostrar Usuario-Desconocido si se fue
+        row = await self._get_suggestion(interaction.message.id)
+        author_name = row[2] if row and len(row) > 2 and row[2] else None
+        member = interaction.guild.get_member(author_id)
+        if member is None:
+            # crea un objeto dummy con display_name guardado
+            class _Dummy:
+                def __init__(self, name, id_):
+                    self.display_name = name or f"Usuario {id_}"
+                    self.display_avatar = interaction.user.display_avatar
+                    self.id = id_
+            author = _Dummy(author_name or f"Usuario {author_id}", author_id)
+        else:
+            author = member
         embed = build_suggestion_embed(content, author, status, yes, no)
         view = self if status == "pending" else None
         await interaction.response.edit_message(embed=embed, view=view)
@@ -50,7 +63,11 @@ class SuggestionView(discord.ui.View):
         if row is None:
             await interaction.response.send_message(embed=error_embed("Sugerencia no encontrada."), ephemeral=True)
             return
-        content, author_id, status, yes, no = row
+        # row ahora es (content, author_id, author_name, status, yes, no)
+        if len(row) == 6:
+            content, author_id, _, status, yes, no = row
+        else:
+            content, author_id, status, yes, no = row
 
         if status != "pending":
             await interaction.response.send_message(
@@ -80,7 +97,11 @@ class SuggestionView(discord.ui.View):
         await db().commit()
         await set_user_vote(message_id, interaction.user.id, vote)
 
-        content, author_id, status, yes, no = await self._get_suggestion(message_id)
+        row2 = await self._get_suggestion(message_id)
+        if len(row2) == 6:
+            content, author_id, _, status, yes, no = row2
+        else:
+            content, author_id, status, yes, no = row2
 
         config = await get_guild_config(interaction.guild_id)
         if config["auto_approve_votes"] and yes >= config["auto_approve_votes"]:
@@ -105,7 +126,10 @@ class SuggestionView(discord.ui.View):
         row = await self._get_suggestion(message_id)
         if row is None:
             return
-        content, author_id, _status, yes, no = row
+        if len(row) == 6:
+            content, author_id, _, _status, yes, no = row
+        else:
+            content, author_id, _status, yes, no = row
 
         await db().execute("UPDATE suggestions SET status = ? WHERE message_id = ?", (status, message_id))
         await db().commit()
@@ -152,10 +176,17 @@ class SuggestionsCog(commands.Cog):
         await interaction.response.send_message(embed=embed, view=SuggestionView())
         message = await interaction.original_response()
 
-        await db().execute(
-            "INSERT INTO suggestions (message_id, guild_id, author_id, content) VALUES (?, ?, ?, ?)",
-            (message.id, interaction.guild_id, interaction.user.id, content),
-        )
+        try:
+            await db().execute(
+                "INSERT INTO suggestions (message_id, guild_id, author_id, author_name, content) VALUES (?, ?, ?, ?, ?)",
+                (message.id, interaction.guild_id, interaction.user.id, interaction.user.display_name, content),
+            )
+        except Exception:
+            # fallback si la columna aún no existe en Turso viejo
+            await db().execute(
+                "INSERT INTO suggestions (message_id, guild_id, author_id, content) VALUES (?, ?, ?, ?)",
+                (message.id, interaction.guild_id, interaction.user.id, content),
+            )
         await db().commit()
 
 

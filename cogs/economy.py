@@ -1,5 +1,8 @@
 from __future__ import annotations
+import asyncio
 import datetime
+import random
+import time
 from typing import Optional
 
 import discord
@@ -26,6 +29,94 @@ def _seconds_to_human(seconds: int) -> str:
     if seconds >= 3600:
         return f"{seconds // 3600} hora(s)"
     return f"{seconds // 60} minuto(s)"
+
+
+JOBS = {"minero": 1500, "pescador": 1000}
+WORK_COOLDOWN = 30 * 60  # 30m
+
+
+class MinerView(discord.ui.View):
+    def __init__(self, author_id: int):
+        super().__init__(timeout=20)
+        self.author_id = author_id
+        self.clicked: set[int] = set()
+        self.success = False
+        for i in range(5):
+            btn = discord.ui.Button(label="🪨", style=discord.ButtonStyle.secondary, custom_id=f"mine_{i}")
+            # closure con defaults para capturar i y btn correctamente
+            async def _cb(interaction: discord.Interaction, idx=i, b=btn):
+                if interaction.user.id != self.author_id:
+                    await interaction.response.send_message(embed=error_embed("Solo tú puedes picar tus rocas."), ephemeral=True)
+                    return
+                if idx in self.clicked:
+                    await interaction.response.defer()
+                    return
+                self.clicked.add(idx)
+                b.disabled = True
+                b.label = "✅"
+                b.style = discord.ButtonStyle.success
+                if len(self.clicked) >= 5:
+                    self.success = True
+                    self.stop()
+                    await interaction.response.edit_message(content="⛏️ ¡Todas las rocas picadas! Reclama tu recompensa.", view=self)
+                else:
+                    await interaction.response.edit_message(view=self)
+            btn.callback = _cb  # type: ignore
+            self.add_item(btn)
+
+
+class FisherView(discord.ui.View):
+    def __init__(self, author_id: int):
+        super().__init__(timeout=30)
+        self.author_id = author_id
+        self.phase = 0  # 0 lanzar, 1 esperando, 2 pica
+        self.success = False
+        self._bite_time: float = 0
+
+    @discord.ui.button(label="🎣 Lanzar caña", style=discord.ButtonStyle.primary)
+    async def launch(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(embed=error_embed("Solo tú puedes pescar."), ephemeral=True)
+            return
+        if self.phase == 0:
+            self.phase = 1
+            button.label = "⏳ Esperando picada..."
+            button.disabled = True
+            button.style = discord.ButtonStyle.secondary
+            await interaction.response.edit_message(content="`Lanzaste la caña... esperando picada 2-4s`", view=self)
+            await asyncio.sleep(random.randint(2, 4))
+            if self.is_finished():
+                return
+            self.phase = 2
+            button.label = "¡TIRA AHORA! 🎣"
+            button.style = discord.ButtonStyle.success
+            button.disabled = False
+            self._bite_time = time.time()
+            try:
+                await interaction.message.edit(content="🐟 ¡Pica! ¡Clicka rápido! (3s)", view=self)
+            except discord.NotFound:
+                return
+            await asyncio.sleep(3)
+            if not self.success and not self.is_finished():
+                self.stop()
+                button.label = "💨 Se escapó..."
+                button.disabled = True
+                button.style = discord.ButtonStyle.danger
+                try:
+                    await interaction.message.edit(content="💨 Se escapó el pez... inténtalo de nuevo.", view=self)
+                except Exception:
+                    pass
+        elif self.phase == 2:
+            # segundo click = tirar
+            if time.time() - self._bite_time <= 3:
+                self.success = True
+                self.stop()
+                button.label = "✅ ¡Pescado!"
+                button.disabled = True
+                button.style = discord.ButtonStyle.success
+                await interaction.response.edit_message(content="🎣 ¡Pescado atrapado!", view=self)
+            else:
+                await interaction.response.send_message(embed=error_embed("Demasiado tarde."), ephemeral=True)
 
 
 class EconomyCog(commands.Cog):
@@ -96,6 +187,63 @@ class EconomyCog(commands.Cog):
         await interaction.response.send_message(
             embed=success_embed(f"💰 Has recibido **{amount}** SoulCoins.\n👛 Saldo actual: **{new_balance}**", title="🎁 Daily reclamado")
         )
+
+    @app_commands.command(name="work", description="Trabaja con minijuego (minero/pescador)")
+    @app_commands.describe(trabajo="Elige tu trabajo")
+    @app_commands.choices(trabajo=[
+        app_commands.Choice(name="⛏️ Minero — 1.500 SoulCoins (pica 5 rocas)", value="minero"),
+        app_commands.Choice(name="🎣 Pescador — 1.000 SoulCoins (timing)", value="pescador"),
+    ])
+    async def work(self, interaction: discord.Interaction, trabajo: app_commands.Choice[str]):
+        job = trabajo.value
+        reward = JOBS[job]
+        # cooldown 30m
+        last = await db.get_work_last(interaction.guild_id, interaction.user.id, job)
+        if last:
+            try:
+                last_dt = datetime.datetime.fromisoformat(last)
+                elapsed = (datetime.datetime.utcnow() - last_dt).total_seconds()
+                if elapsed < WORK_COOLDOWN:
+                    rem = int(WORK_COOLDOWN - elapsed)
+                    await interaction.response.send_message(
+                        embed=error_embed(f"Estás cansado de **{job}**. Vuelve en **{rem//60}m {rem%60}s**."), ephemeral=True
+                    )
+                    return
+            except Exception:
+                pass
+        # también cooldown global (cualquier trabajo) para evitar spam
+        # si quieres global, descomenta:
+        # for j in JOBS:
+        #     if j != job:
+        #         last2 = await db.get_work_last(interaction.guild_id, interaction.user.id, j)
+        #         ...
+
+        await interaction.response.defer(ephemeral=True)
+        if job == "minero":
+            view = MinerView(interaction.user.id)
+            await interaction.followup.send(content=f"⛏️ **Minero** — pica las 5 rocas en 20s por **{reward}** SoulCoins!", view=view, ephemeral=True)
+            await view.wait()
+            if view.success and len(view.clicked) >= 5:
+                new_bal = await db.add_coins(interaction.guild_id, interaction.user.id, reward, reason=f"work:{job}")
+                await db.set_work_last(interaction.guild_id, interaction.user.id, job)
+                await interaction.followup.send(embed=success_embed(f"⛏️ ¡Trabajo completado! +**{reward}** SoulCoins\n👛 Saldo: **{new_bal}**"), ephemeral=True)
+            else:
+                await interaction.followup.send(embed=error_embed("No completaste las 5 rocas a tiempo. Inténtalo de nuevo (sin cooldown)."), ephemeral=True)
+        else:  # pescador
+            view = FisherView(interaction.user.id)
+            await interaction.followup.send(content=f"🎣 **Pescador** — lanza y tira a tiempo por **{reward}** SoulCoins!", view=view, ephemeral=True)
+            await view.wait()
+            if view.success:
+                new_bal = await db.add_coins(interaction.guild_id, interaction.user.id, reward, reason=f"work:{job}")
+                await db.set_work_last(interaction.guild_id, interaction.user.id, job)
+                await interaction.followup.send(embed=success_embed(f"🎣 ¡Pesca perfecta! +**{reward}** SoulCoins\n👛 Saldo: **{new_bal}**"), ephemeral=True)
+            else:
+                # si falló por timeout, el view ya editó el mensaje a "Se escapó..."
+                if not view.is_finished() or not view.success:
+                    try:
+                        await interaction.followup.send(embed=error_embed("Se escapó el pez... inténtalo de nuevo (sin cooldown)."), ephemeral=True)
+                    except Exception:
+                        pass
 
     @app_commands.command(name="pay", description="Transfiere SoulCoins a otro usuario")
     @app_commands.describe(usuario="Usuario que recibe las coins", cantidad="Cantidad a transferir")

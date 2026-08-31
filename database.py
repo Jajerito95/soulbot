@@ -212,11 +212,23 @@ async def init_db():
             assigned_by INTEGER,
             PRIMARY KEY (guild_id, user_id, role_id)
         );
+
+        CREATE TABLE IF NOT EXISTS work_cooldown (
+            guild_id INTEGER,
+            user_id INTEGER,
+            job TEXT,
+            last_work TEXT,
+            PRIMARY KEY (guild_id, user_id, job)
+        );
         """
     )
     # Migración simple para bases de datos ya existentes (añade columnas nuevas si faltan)
     existing_cols = {row[1] for row in await (await _db.execute("PRAGMA table_info(guild_config)")).fetchall()}
     new_cols = {
+        "farewell_enabled": "INTEGER DEFAULT 0",
+        "farewell_channel_id": "INTEGER",
+        "farewell_message": "TEXT",
+        "color_panel_channel_id": "INTEGER",
         "logs_channel_id": "INTEGER",
         "logs_members": "INTEGER DEFAULT 1",
         "logs_moderation": "INTEGER DEFAULT 1",
@@ -269,6 +281,13 @@ async def init_db():
         await _db.execute("ALTER TABLE shop_items ADD COLUMN xp_amount INTEGER")
     if "temprole_seconds" not in shop_cols:
         await _db.execute("ALTER TABLE shop_items ADD COLUMN temprole_seconds INTEGER")
+    # fix viejo: author_id en suggestions era int pero ahora guardamos nombre también
+    sugg_cols = {row[1] for row in await (await _db.execute("PRAGMA table_info(suggestions)")).fetchall()}
+    if "author_name" not in sugg_cols:
+        try:
+            await _db.execute("ALTER TABLE suggestions ADD COLUMN author_name TEXT")
+        except Exception:
+            pass
 
     tickets_cols = {row[1] for row in await (await _db.execute("PRAGMA table_info(tickets)")).fetchall()}
     if "claimed_at" not in tickets_cols:
@@ -780,6 +799,22 @@ async def get_economy_leaderboard(guild_id: int, limit: int = 10) -> list[tuple[
         "SELECT user_id, balance FROM economy WHERE guild_id = ? ORDER BY balance DESC LIMIT ?", (guild_id, limit)
     )
     return await cur.fetchall()
+
+
+# ---------- trabajos ----------
+async def get_work_last(guild_id: int, user_id: int, job: str) -> str | None:
+    cur = await _db.execute("SELECT last_work FROM work_cooldown WHERE guild_id = ? AND user_id = ? AND job = ?", (guild_id, user_id, job))
+    row = await cur.fetchone()
+    return row[0] if row else None
+
+async def set_work_last(guild_id: int, user_id: int, job: str):
+    now = __import__("datetime").datetime.utcnow().isoformat()
+    await _db.execute(
+        """INSERT INTO work_cooldown (guild_id, user_id, job, last_work) VALUES (?, ?, ?, ?)
+           ON CONFLICT(guild_id, user_id, job) DO UPDATE SET last_work = ?""",
+        (guild_id, user_id, job, now, now),
+    )
+    await _db.commit()
 
 
 # ---------- tienda ----------
