@@ -37,13 +37,13 @@ WORK_COOLDOWN = 30 * 60  # 30m
 
 class MinerView(discord.ui.View):
     def __init__(self, author_id: int):
-        super().__init__(timeout=20)
+        super().__init__(timeout=12)
         self.author_id = author_id
         self.clicked: set[int] = set()
         self.success = False
+        self.start = time.time()
         for i in range(5):
             btn = discord.ui.Button(label="🪨", style=discord.ButtonStyle.secondary, custom_id=f"mine_{i}")
-            # closure con defaults para capturar i y btn correctamente
             async def _cb(interaction: discord.Interaction, idx=i, b=btn):
                 if interaction.user.id != self.author_id:
                     await interaction.response.send_message(embed=error_embed("Solo tú puedes picar tus rocas."), ephemeral=True)
@@ -57,6 +57,7 @@ class MinerView(discord.ui.View):
                 b.style = discord.ButtonStyle.success
                 if len(self.clicked) >= 5:
                     self.success = True
+                    self.elapsed = time.time() - self.start
                     self.stop()
                     await interaction.response.edit_message(content="⛏️ ¡Todas las rocas picadas! Reclama tu recompensa.", view=self)
                 else:
@@ -67,56 +68,44 @@ class MinerView(discord.ui.View):
 
 class FisherView(discord.ui.View):
     def __init__(self, author_id: int):
-        super().__init__(timeout=30)
+        super().__init__(timeout=12)
         self.author_id = author_id
-        self.phase = 0  # 0 lanzar, 1 esperando, 2 pica
         self.success = False
-        self._bite_time: float = 0
-
-    @discord.ui.button(label="🎣 Lanzar caña", style=discord.ButtonStyle.primary)
-    async def launch(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message(embed=error_embed("Solo tú puedes pescar."), ephemeral=True)
-            return
-        if self.phase == 0:
-            self.phase = 1
-            button.label = "⏳ Esperando picada..."
-            button.disabled = True
-            button.style = discord.ButtonStyle.secondary
-            await interaction.response.edit_message(content="`Lanzaste la caña... esperando picada 2-4s`", view=self)
-            await asyncio.sleep(random.randint(2, 4))
-            if self.is_finished():
-                return
-            self.phase = 2
-            button.label = "¡TIRA AHORA! 🎣"
-            button.style = discord.ButtonStyle.success
-            button.disabled = False
-            self._bite_time = time.time()
-            try:
-                await interaction.message.edit(content="🐟 ¡Pica! ¡Clicka rápido! (3s)", view=self)
-            except discord.NotFound:
-                return
-            await asyncio.sleep(3)
-            if not self.success and not self.is_finished():
-                self.stop()
-                button.label = "💨 Se escapó..."
-                button.disabled = True
-                button.style = discord.ButtonStyle.danger
-                try:
-                    await interaction.message.edit(content="💨 Se escapó el pez... inténtalo de nuevo.", view=self)
-                except Exception:
-                    pass
-        elif self.phase == 2:
-            # segundo click = tirar
-            if time.time() - self._bite_time <= 3:
-                self.success = True
-                self.stop()
-                button.label = "✅ ¡Pescado!"
-                button.disabled = True
-                button.style = discord.ButtonStyle.success
-                await interaction.response.edit_message(content="🎣 ¡Pescado atrapado!", view=self)
-            else:
-                await interaction.response.send_message(embed=error_embed("Demasiado tarde."), ephemeral=True)
+        self.start = time.time()
+        self._chosen = False
+        self.correct = random.randint(0, 2)
+        for i in range(3):
+            is_correct = i == self.correct
+            label = "🐟" if is_correct else "🌊"
+            style = discord.ButtonStyle.success if is_correct else discord.ButtonStyle.secondary
+            btn = discord.ui.Button(label=label, style=style, custom_id=f"fish_{i}")
+            async def _cb(interaction: discord.Interaction, is_c=is_correct, b=btn):
+                if interaction.user.id != self.author_id:
+                    await interaction.response.send_message(embed=error_embed("Solo tú puedes pescar."), ephemeral=True)
+                    return
+                if self._chosen:
+                    await interaction.response.defer()
+                    return
+                self._chosen = True
+                if is_c:
+                    self.success = True
+                    self.elapsed = time.time() - self.start
+                    self.stop()
+                    b.label = "✅"
+                    # desactiva otros
+                    for child in self.children:
+                        child.disabled = True
+                    await interaction.response.edit_message(content="🎣 ¡Pescado atrapado! El jefe está orgulloso.", view=self)
+                else:
+                    b.label = "❌"
+                    b.style = discord.ButtonStyle.danger
+                    b.disabled = True
+                    for child in self.children:
+                        child.disabled = True
+                    self.stop()
+                    await interaction.response.edit_message(content="💨 Fallaste — era el otro lado. Inténtalo de nuevo.", view=self)
+            btn.callback = _cb  # type: ignore
+            self.add_item(btn)
 
 
 class EconomyCog(commands.Cog):
@@ -219,31 +208,115 @@ class EconomyCog(commands.Cog):
         #         ...
 
         await interaction.response.defer(ephemeral=True)
+        # helper multiplier
+        async def _bonus_multiplier(base: int) -> tuple[int, str]:
+            try:
+                mult = await db.get_user_multiplier(interaction.guild_id, interaction.user.id)
+                cfg = await db.get_guild_config(interaction.guild_id)
+                has = False
+                val = 1.0
+                if mult and mult[0] and float(mult[0]) > 1:
+                    # check expiry
+                    exp = mult[1]
+                    if not exp or exp > datetime.datetime.utcnow().isoformat():
+                        has = True
+                        val = float(mult[0])
+                # global boost también cuenta como jefe
+                gval = cfg.get("xp_global_multiplier") or 1
+                gexp = cfg.get("xp_global_multiplier_expires")
+                if not has and gval and float(gval) > 1 and (not gexp or gexp > datetime.datetime.utcnow().isoformat()):
+                    has = True
+                    val = float(gval)
+                if has and val > 1:
+                    extra = int(base * (val - 1))
+                    return extra, f"\n🎁 ¡El jefe tenía multiplier x{val} y te dio bonus +{extra}!"
+            except Exception:
+                pass
+            return 0, ""
+
         if job == "minero":
             view = MinerView(interaction.user.id)
-            await interaction.followup.send(content=f"⛏️ **Minero** — pica las 5 rocas en 20s por **{reward}** SoulCoins!", view=view, ephemeral=True)
+            await interaction.followup.send(content=f"⛏️ **Minero** — pica las 5 rocas en 12s por **{reward}** SoulCoins!", view=view, ephemeral=True)
             await view.wait()
             if view.success and len(view.clicked) >= 5:
-                new_bal = await db.add_coins(interaction.guild_id, interaction.user.id, reward, reason=f"work:{job}")
+                final = reward
+                bonus_msg = ""
+                elapsed = getattr(view, "elapsed", 999)
+                if elapsed < 5:
+                    bonus = 500
+                    final += bonus
+                    bonus_msg += f"\n⚡ ¡Bonus veloz! +{bonus} (¡{elapsed:.1f}s, el jefe está orgulloso!)"
+                extra, mmsg = await _bonus_multiplier(final)
+                if extra:
+                    final += extra
+                    bonus_msg += mmsg
+                new_bal = await db.add_coins(interaction.guild_id, interaction.user.id, final, reason=f"work:{job}")
                 await db.set_work_last(interaction.guild_id, interaction.user.id, job)
-                await interaction.followup.send(embed=success_embed(f"⛏️ ¡Trabajo completado! +**{reward}** SoulCoins\n👛 Saldo: **{new_bal}**"), ephemeral=True)
+                await interaction.followup.send(embed=success_embed(f"⛏️ ¡Trabajo completado! +**{final}** SoulCoins{bonus_msg}\n👛 Saldo: **{new_bal}**"), ephemeral=True)
             else:
                 await interaction.followup.send(embed=error_embed("No completaste las 5 rocas a tiempo. Inténtalo de nuevo (sin cooldown)."), ephemeral=True)
         else:  # pescador
             view = FisherView(interaction.user.id)
-            await interaction.followup.send(content=f"🎣 **Pescador** — lanza y tira a tiempo por **{reward}** SoulCoins!", view=view, ephemeral=True)
+            await interaction.followup.send(content=f"🎣 **Pescador** — elige el pez correcto en 12s por **{reward}** SoulCoins!", view=view, ephemeral=True)
             await view.wait()
             if view.success:
-                new_bal = await db.add_coins(interaction.guild_id, interaction.user.id, reward, reason=f"work:{job}")
+                final = reward
+                bonus_msg = ""
+                elapsed = getattr(view, "elapsed", 999)
+                if elapsed < 3:
+                    bonus = 300
+                    final += bonus
+                    bonus_msg += f"\n⚡ ¡Bonus veloz! +{bonus} (¡{elapsed:.1f}s, reflejos de jefe!)"
+                extra, mmsg = await _bonus_multiplier(final)
+                if extra:
+                    final += extra
+                    bonus_msg += mmsg
+                new_bal = await db.add_coins(interaction.guild_id, interaction.user.id, final, reason=f"work:{job}")
                 await db.set_work_last(interaction.guild_id, interaction.user.id, job)
-                await interaction.followup.send(embed=success_embed(f"🎣 ¡Pesca perfecta! +**{reward}** SoulCoins\n👛 Saldo: **{new_bal}**"), ephemeral=True)
+                await interaction.followup.send(embed=success_embed(f"🎣 ¡Pesca perfecta! +**{final}** SoulCoins{bonus_msg}\n👛 Saldo: **{new_bal}**"), ephemeral=True)
             else:
-                # si falló por timeout, el view ya editó el mensaje a "Se escapó..."
-                if not view.is_finished() or not view.success:
+                if not view.success:
                     try:
-                        await interaction.followup.send(embed=error_embed("Se escapó el pez... inténtalo de nuevo (sin cooldown)."), ephemeral=True)
+                        await interaction.followup.send(embed=error_embed("Fallaste o se acabó el tiempo... inténtalo de nuevo (sin cooldown)."), ephemeral=True)
                     except Exception:
                         pass
+
+    works_group = app_commands.Group(name="works", description="Trabajos — estado y atajos")
+
+    @works_group.command(name="status", description="Mira tus cooldowns de trabajo")
+    async def works_status(self, interaction: discord.Interaction):
+        lines = []
+        for job in JOBS:
+            last = await db.get_work_last(interaction.guild_id, interaction.user.id, job)
+            if not last:
+                lines.append(f"✅ **{job.capitalize()}** — listo")
+            else:
+                try:
+                    elapsed = (datetime.datetime.utcnow() - datetime.datetime.fromisoformat(last)).total_seconds()
+                    if elapsed >= WORK_COOLDOWN:
+                        lines.append(f"✅ **{job.capitalize()}** — listo")
+                    else:
+                        rem = int(WORK_COOLDOWN - elapsed)
+                        lines.append(f"⏳ **{job.capitalize()}** — {rem//60}m {rem%60}s restantes")
+                except: lines.append(f"✅ **{job.capitalize()}** — listo")
+        # multiplier info
+        try:
+            mult = await db.get_user_multiplier(interaction.guild_id, interaction.user.id)
+            if mult and mult[0] and float(mult[0]) > 1:
+                lines.append(f"\n🎁 Multiplier activo x{mult[0]} — el jefe te dará bonus en /work!")
+        except: pass
+        await interaction.response.send_message(embed=success_embed("\n".join(lines), title="🛠️ Estado de trabajos"), ephemeral=True)
+
+    @works_group.command(name="minero", description="Atajo directo a /work minero")
+    async def works_minero(self, interaction: discord.Interaction):
+        # reutiliza la misma lógica que /work minero
+        fake_choice = type("C", (), {"value": "minero"})()
+        await self.work(interaction, fake_choice)  # type: ignore
+
+    @works_group.command(name="pescador", description="Atajo directo a /work pescador")
+    async def works_pescador(self, interaction: discord.Interaction):
+        fake_choice = type("C", (), {"value": "pescador"})()
+        await self.work(interaction, fake_choice)  # type: ignore
 
     @app_commands.command(name="pay", description="Transfiere SoulCoins a otro usuario")
     @app_commands.describe(usuario="Usuario que recibe las coins", cantidad="Cantidad a transferir")
