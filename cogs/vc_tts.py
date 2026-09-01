@@ -2,11 +2,21 @@ from __future__ import annotations
 import asyncio
 import os
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 
 from config import COLOR
 from utils.embeds import success_embed, error_embed
+
+EDGE_VOICES = {
+    "alvaro": "es-ES-AlvaroNeural",
+    "elvira": "es-ES-ElviraNeural",
+    "arnau": "es-ES-ArnauNeural",
+    "dalia": "es-MX-DaliaNeural",
+    "jorge": "es-MX-JorgeNeural",
+    "elena": "es-AR-ElenaNeural",
+    "tomas": "es-AR-TomasNeural",
+}
 
 # TTS: intenta ElevenLabs si hay key, si no gTTS
 # Se lee en cada _speak para coger cambios de env sin reiniciar import
@@ -28,41 +38,45 @@ class VCTtsCog(commands.Cog):
         self.bot = bot
         self._locks: dict[int, asyncio.Lock] = {}
         self._last_speaker: dict[int, int] = {}
+        self._guild_voice: dict[int, str] = {}
+        self.voice_check.start()
+
+    def cog_unload(self):
+        try: self.voice_check.cancel()
+        except: pass
 
     def _lock(self, guild_id: int) -> asyncio.Lock:
         if guild_id not in self._locks:
             self._locks[guild_id] = asyncio.Lock()
         return self._locks[guild_id]
 
+    @tasks.loop(minutes=2)
+    async def voice_check(self):
+        # revisa cada 2m si sigue solo en VC -> desconecta
+        try:
+            await self.bot.wait_until_ready()
+            for guild in list(self.bot.guilds):
+                vc = guild.voice_client
+                if vc and vc.is_connected() and vc.channel:
+                    non_bot = [m for m in vc.channel.members if not m.bot]
+                    if len(non_bot) == 0:
+                        try:
+                            print(f"[vc_tts] voice_check solo, desconectando {guild.name}", flush=True)
+                            await vc.disconnect()
+                            self._last_speaker.pop(guild.id, None)
+                        except: pass
+        except: pass
+
+    @voice_check.before_loop
+    async def before_voice_check(self):
+        await self.bot.wait_until_ready()
+
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         if member.bot:
             return
-        # auto-join cuando alguien entra a un VC y el bot no está
-        if before.channel is None and after.channel is not None:
-            guild = member.guild
-            me = guild.me
-            # si el bot ya está en algún VC del guild, no hace nada
-            if me.voice and me.voice.channel:
-                return
-            # solo si el canal no es AFK y tiene permisos
-            perms = after.channel.permissions_for(me)
-            if not perms.connect or not perms.speak:
-                return
-            try:
-                await after.channel.connect(timeout=5.0, self_deaf=False)
-            except discord.ClientException as e:
-                # PyNaCl missing -> avisa sin crashear
-                if "PyNaCl" in str(e):
-                    try:
-                        # intenta avisar en el canal de sistema si existe
-                        if guild.system_channel:
-                            await guild.system_channel.send(embed=error_embed("❌ Voice necesita `PyNaCl`. Añade `PyNaCl` a requirements.txt y redeploya."))
-                    except: pass
-                pass
-            except Exception:
-                pass
-        # auto-leave si se queda solo
+        # ya no auto-join al entrar a VC — ahora es al hablar en chat (on_message)
+        # solo auto-leave si se queda solo
         if before.channel is not None and after.channel is None:
             guild = member.guild
             me = guild.me
@@ -70,21 +84,42 @@ class VCTtsCog(commands.Cog):
                 if len([m for m in before.channel.members if not m.bot]) == 0:
                     try: await me.voice.channel.guild.voice_client.disconnect()
                     except: pass
+                    self._last_speaker.pop(guild.id, None)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild or not message.content:
             return
-        # solo si el bot está en VC en ese guild y el mensaje es en un canal de texto visible
         guild = message.guild
-        vc = guild.voice_client
-        if not vc or not vc.is_connected():
-            return
-        # evita spam: solo lee mensajes de hasta 200 chars y no comandos
         content = message.content.strip()
         if content.startswith("/") or content.startswith("!") or len(content) > 200:
             return
-        # primer mensaje dice nombre, los siguientes del mismo user solo contenido, si cambia user dice nombre de nuevo
+        # auto-join al hablar: si no está en VC y el autor está en VC, conéctate a su canal
+        vc = guild.voice_client
+        if not vc or not vc.is_connected():
+            if message.author.voice and message.author.voice.channel:
+                target = message.author.voice.channel
+                perms = target.permissions_for(guild.me)
+                if perms.connect and perms.speak and target.guild.id == guild.id:
+                    try:
+                        await target.connect(self_deaf=False)
+                        vc = guild.voice_client
+                        print(f"[vc_tts] auto-join al hablar {target.name} por {message.author.display_name}", flush=True)
+                    except Exception as e:
+                        try: print(f"[vc_tts] auto-join fail: {e}", flush=True)
+                        except: pass
+                        return
+                else:
+                    return
+            else:
+                return
+        # verifica que realmente sigue conectado (si se cayó, el voice_check lo limpia, pero aquí también)
+        if not vc or not vc.is_connected() or not vc.channel:
+            return
+        # si el bot está solo (sin nadie), no lee
+        if len([m for m in vc.channel.members if not m.bot]) == 0:
+            return
+        # primer mensaje dice nombre, los siguientes del mismo user solo contenido
         last = self._last_speaker.get(guild.id)
         if last != message.author.id:
             tts_text = f"{message.author.display_name} dice: {content}"
@@ -103,7 +138,7 @@ class VCTtsCog(commands.Cog):
         # --- EDGE-TTS PIPE (free, español instant) -> primero para no pagar 402 delay ---
         try:
             import shutil, subprocess
-            edge_voice = os.getenv("EDGE_TTS_VOICE", "es-ES-AlvaroNeural")
+            edge_voice = self._guild_voice.get(guild.id) or os.getenv("EDGE_TTS_VOICE", "es-ES-AlvaroNeural")
             if shutil.which("ffmpeg"):
                 try:
                     import edge_tts
@@ -354,6 +389,28 @@ class VCTtsCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         await self._speak(interaction.guild, texto)
         await interaction.followup.send(embed=success_embed(f"🔊 TTS: *{texto[:80]}*"), ephemeral=True)
+
+    @vc_group.command(name="voices", description="Lista voces TTS disponibles")
+    async def vc_voices(self, interaction: discord.Interaction):
+        lines = [f"`{k}` → {v}" for k, v in EDGE_VOICES.items()]
+        cur = self._guild_voice.get(interaction.guild_id) or os.getenv("EDGE_TTS_VOICE", "es-ES-AlvaroNeural")
+        await interaction.response.send_message(embed=success_embed("\n".join(lines) + f"\n\nActual: **{cur}**\nCambia con `/vc voice <nombre>`", title="🎙️ Voces TTS"), ephemeral=True)
+
+    @vc_group.command(name="voice", description="Cambia la voz TTS del bot (es-ES/es-MX/es-AR)")
+    @app_commands.describe(voz="Nombre de voz: alvaro, elvira, arnau, dalia, jorge, elena, tomas")
+    @app_commands.choices(voz=[
+        app_commands.Choice(name="Alvaro (ES neutro)", value="alvaro"),
+        app_commands.Choice(name="Elvira (ES femenina)", value="elvira"),
+        app_commands.Choice(name="Arnau (ES catalán)", value="arnau"),
+        app_commands.Choice(name="Dalia (MX femenina)", value="dalia"),
+        app_commands.Choice(name="Jorge (MX masculino)", value="jorge"),
+        app_commands.Choice(name="Elena (AR femenina)", value="elena"),
+        app_commands.Choice(name="Tomas (AR masculino)", value="tomas"),
+    ])
+    async def vc_voice(self, interaction: discord.Interaction, voz: app_commands.Choice[str]):
+        voice_id = EDGE_VOICES.get(voz.value, "es-ES-AlvaroNeural")
+        self._guild_voice[interaction.guild_id] = voice_id
+        await interaction.response.send_message(embed=success_embed(f"Voz cambiada a **{voz.name}** `{voice_id}` 🔊\nPrueba con `/vc tts texto:hola`", title="🎙️ Voz TTS"), ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(VCTtsCog(bot))
