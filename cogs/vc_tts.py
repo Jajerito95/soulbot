@@ -149,8 +149,16 @@ class VCTtsCog(commands.Cog):
             else:
                 await target.connect(self_deaf=False)
             await interaction.response.send_message(embed=success_embed(f"Conectado a {target.mention} 🔊\nAhora leo el chat por TTS (gTTS/ElevenLabs)."), ephemeral=True)
+        except discord.ClientException as e:
+            if "PyNaCl" in str(e):
+                await interaction.response.send_message(embed=error_embed("❌ Voice necesita `PyNaCl` — estoy redeplegando. Espera 2-3 min y prueba `/vc join` de nuevo. Si sigue, haz `Clear build cache & Deploy` en Render."), ephemeral=True)
+            else:
+                await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            if "PyNaCl" in str(e):
+                await interaction.response.send_message(embed=error_embed("❌ Voice necesita `PyNaCl` — redeploy en curso, espera 2-3 min."), ephemeral=True)
+            else:
+                await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
     @vc_group.command(name="leave", description="Desconecta al bot del VC")
     async def vc_leave(self, interaction: discord.Interaction):
