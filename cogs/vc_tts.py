@@ -11,7 +11,12 @@ from utils.embeds import success_embed, error_embed
 # TTS: intenta ElevenLabs si hay key, si no gTTS
 # Se lee en cada _speak para coger cambios de env sin reiniciar import
 def _eleven_cfg():
-    return os.getenv("ELEVENLABS_API_KEY"), os.getenv("ELEVENLABS_VOICE_ID", "PltXjU3hWkDRqpu9TowY")
+    k = os.getenv("ELEVENLABS_API_KEY")
+    v = os.getenv("ELEVENLABS_VOICE_ID", "PltXjU3hWkDRqpu9TowY")
+    try:
+        print(f"[vc_tts] cfg key={'SET' if k else 'MISSING'} voice={v}", flush=True)
+    except: pass
+    return k, v
 try:
     from gtts import gTTS
     HAS_GTTS = True
