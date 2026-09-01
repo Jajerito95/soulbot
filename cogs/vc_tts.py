@@ -27,6 +27,7 @@ class VCTtsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._locks: dict[int, asyncio.Lock] = {}
+        self._last_speaker: dict[int, int] = {}
 
     def _lock(self, guild_id: int) -> asyncio.Lock:
         if guild_id not in self._locks:
@@ -83,9 +84,15 @@ class VCTtsCog(commands.Cog):
         content = message.content.strip()
         if content.startswith("/") or content.startswith("!") or len(content) > 200:
             return
-        # cola por guild para no solapar audios - solo contenido para ser instant como /vc tts
+        # primer mensaje dice nombre, los siguientes del mismo user solo contenido, si cambia user dice nombre de nuevo
+        last = self._last_speaker.get(guild.id)
+        if last != message.author.id:
+            tts_text = f"{message.author.display_name} dice: {content}"
+        else:
+            tts_text = content
+        self._last_speaker[guild.id] = message.author.id
         async with self._lock(guild.id):
-            await self._speak(guild, content)
+            await self._speak(guild, tts_text)
 
     async def _speak(self, guild: discord.Guild, text: str):
         vc = guild.voice_client
