@@ -380,6 +380,27 @@ class CodeSyncCog(commands.Cog):
                 "Error", "No pude guardar la vinculacion en la base de datos."))
             return
 
+        # Codigo de regalo (gift): no tiene mcname/uuid, solo role -> asigna rol y consume sin validar nick
+        gift_role = link.get("role")
+        if gift_role:
+            # es un codigo de regalo, no necesita cuenta MC
+            if interaction.guild is not None:
+                role = interaction.guild.get_role(int(gift_role))
+                if role:
+                    try:
+                        await interaction.user.add_roles(role, reason="Codigo de regalo SoulSeeker")
+                    except discord.HTTPException:
+                        pass
+                    await asyncio.to_thread(consume_link, codigo.strip())
+                    await interaction.followup.send(embed=base_embed(f"Código de regalo canjeado ✅\nHas recibido {role.mention} (7 días de validez).", color=COLOR_SUCCESS, title="¡Regalo canjeado!"))
+                    return
+                else:
+                    await interaction.followup.send(embed=error_embed("Rol no encontrado", "El rol de este código ya no existe."))
+                    return
+            else:
+                await interaction.followup.send(embed=error_embed("Error", "No pude asignar el rol."))
+                return
+
         raw_name = link["mcname"] or link["uuid"] or ""
         mcname = sanitize_mcname(raw_name)
         if not mcname:
