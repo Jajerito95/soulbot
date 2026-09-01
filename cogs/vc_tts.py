@@ -163,8 +163,67 @@ class VCTtsCog(commands.Cog):
                             try: proc.terminate()
                             except: pass
             except Exception as e:
-                try: print(f"[vc_tts] pipe setup fail: {e}")
+                try: print(f"[vc_tts] pipe setup fail: {e}", flush=True)
                 except: pass
+        # --- EDGE-TTS PIPE (free, español instant) ---
+        try:
+            import shutil, subprocess
+            edge_voice = os.getenv("EDGE_TTS_VOICE", "es-ES-AlvaroNeural")
+            if shutil.which("ffmpeg"):
+                try:
+                    import edge_tts
+                    proc2 = subprocess.Popen(
+                        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1"],
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0
+                    )
+                    loop2 = asyncio.get_running_loop()
+                    edge_success = False
+                    async def _edge_feed():
+                        nonlocal edge_success
+                        try:
+                            comm = edge_tts.Communicate(text, voice=edge_voice)
+                            async for chunk in comm.stream():
+                                if chunk["type"] == "audio":
+                                    data = chunk["data"]
+                                    await loop2.run_in_executor(None, proc2.stdin.write, data)
+                            try: proc2.stdin.close()
+                            except: pass
+                            edge_success = True
+                        except Exception as ee:
+                            try: print(f"[vc_tts] edge feed fail: {ee}", flush=True)
+                            except: pass
+                            try: proc2.stdin.close()
+                            except: pass
+                    edge_task = asyncio.create_task(_edge_feed())
+                    await asyncio.sleep(0.25)
+                    if proc2.poll() is None or edge_success:
+                        try:
+                            source = discord.PCMAudio(proc2.stdout)
+                            source = discord.PCMVolumeTransformer(source, volume=0.9)
+                            print(f"[vc_tts] edge pipe streaming '{text[:30]}' voice={edge_voice} in {guild.name}", flush=True)
+                            vc.play(source, after=lambda e: print(f"[vc_tts] edge after: {e}", flush=True))
+                            while vc.is_playing():
+                                await asyncio.sleep(0.2)
+                            await edge_task
+                            try: proc2.terminate()
+                            except: pass
+                            try: proc2.wait(timeout=1)
+                            except: pass
+                            if edge_success:
+                                print("[vc_tts] edge pipe finished", flush=True)
+                                return
+                        except Exception as ee:
+                            try: print(f"[vc_tts] edge play fail: {ee}", flush=True)
+                            except: pass
+                            try: proc2.terminate()
+                            except: pass
+                except ImportError:
+                    print("[vc_tts] edge-tts not installed", flush=True)
+                except Exception as ee:
+                    try: print(f"[vc_tts] edge setup fail: {ee}", flush=True)
+                    except: pass
+        except Exception:
+            pass
         # --- FALLBACK FILE (gTTS o ElevenLabs sin pipe) ---
         audio_path = None
         try:
