@@ -9,7 +9,9 @@ from config import COLOR
 from utils.embeds import success_embed, error_embed
 
 # TTS: intenta ElevenLabs si hay key, si no gTTS
-ELEVEN_KEY = os.getenv("ELEVENLABS_API_KEY")
+# Se lee en cada _speak para coger cambios de env sin reiniciar import
+def _eleven_cfg():
+    return os.getenv("ELEVENLABS_API_KEY"), os.getenv("ELEVENLABS_VOICE_ID", "PltXjU3hWkDRqpu9TowY")
 try:
     from gtts import gTTS
     HAS_GTTS = True
@@ -90,40 +92,54 @@ class VCTtsCog(commands.Cog):
         # genera audio
         audio_path = None
         try:
-            # intenta ElevenLabs si hay key
-            if ELEVEN_KEY:
+            # intenta ElevenLabs si hay key (voice español PltXjU3hWkDRqpu9TowY)
+            eleven_key, eleven_voice = _eleven_cfg()
+            if eleven_key:
                 try:
                     import aiohttp
                     async with aiohttp.ClientSession() as s:
                         async with s.post(
-                            "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM/stream",
-                            headers={"xi-api-key": ELEVEN_KEY, "Content-Type": "application/json"},
-                            json={"text": text, "model_id": "eleven_multilingual_v2", "voice_settings": {"stability": 0.5, "similarity_boost": 0.7}},
-                            timeout=aiohttp.ClientTimeout(total=15),
+                            f"https://api.elevenlabs.io/v1/text-to-speech/{eleven_voice}/stream",
+                            headers={"xi-api-key": eleven_key, "Content-Type": "application/json"},
+                            json={"text": text, "model_id": "eleven_multilingual_v2", "voice_settings": {"stability": 0.6, "similarity_boost": 0.75, "style": 0.0, "use_speaker_boost": True}},
+                            timeout=aiohttp.ClientTimeout(total=12),
                         ) as r:
                             if r.status == 200:
                                 data = await r.read()
                                 audio_path = f"/tmp/tts_{guild.id}.mp3"
                                 open(audio_path, "wb").write(data)
-                except Exception:
+                            else:
+                                # log error sin exponer key
+                                try: print(f"[vc_tts] ElevenLabs {r.status}: {await r.text()[:200]}")
+                                except: pass
+                except Exception as e:
+                    try: print(f"[vc_tts] ElevenLabs fail: {e}")
+                    except: pass
                     audio_path = None
             if not audio_path and HAS_GTTS:
                 audio_path = f"/tmp/tts_{guild.id}.mp3"
-                tts = gTTS(text=text, lang="es", slow=False)
+                # tld=es para voz española nativa, no china; slow=False reduce delay
+                tts = gTTS(text=text, lang="es", tld="es", slow=False)
                 await asyncio.to_thread(tts.save, audio_path)
             if not audio_path or not os.path.exists(audio_path):
                 return
-            # reproduce con ffmpeg si está disponible
+            # reproduce con ffmpeg — Opus es más estable que PCM y evita entrecortado
             try:
-                source = discord.FFmpegPCMAudio(audio_path, options="-loglevel quiet")
+                # intenta Opus (menos delay) y fallback a PCM
+                try:
+                    source = discord.FFmpegOpusAudio(audio_path, options="-loglevel quiet")
+                except Exception:
+                    source = discord.FFmpegPCMAudio(audio_path, options="-loglevel quiet -ar 48000 -ac 2")
+                # volumen 100% sin distorsión
+                source = discord.PCMVolumeTransformer(source, volume=0.9)
                 vc.play(source)
                 while vc.is_playing():
-                    await asyncio.sleep(0.3)
+                    await asyncio.sleep(0.25)
             except discord.ClientException:
                 pass
-            except Exception:
-                # fallback sin ffmpeg: ignora
-                pass
+            except Exception as e:
+                try: print(f"[vc_tts] play fail: {e}")
+                except: pass
         finally:
             try:
                 if audio_path and os.path.exists(audio_path):
