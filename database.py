@@ -289,6 +289,36 @@ async def init_db():
             claimed_at TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (event_id, user_id)
         );
+
+        CREATE TABLE IF NOT EXISTS streaks (
+            guild_id INTEGER,
+            user_id INTEGER,
+            type TEXT,
+            current_streak INTEGER DEFAULT 0,
+            max_streak INTEGER DEFAULT 0,
+            last_date TEXT,
+            PRIMARY KEY (guild_id, user_id, type)
+        );
+
+        CREATE TABLE IF NOT EXISTS boss_current (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            boss_name TEXT,
+            max_hp INTEGER,
+            current_hp INTEGER,
+            image_url TEXT,
+            status TEXT DEFAULT 'active',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            ended_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS boss_damage (
+            event_id INTEGER,
+            guild_id INTEGER,
+            user_id INTEGER,
+            damage INTEGER DEFAULT 0,
+            PRIMARY KEY (event_id, user_id)
+        );
         """
     )
     # Migración simple para bases de datos ya existentes (añade columnas nuevas si faltan)

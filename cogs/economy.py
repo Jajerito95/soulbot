@@ -172,9 +172,31 @@ class EconomyCog(commands.Cog):
         amount = random.randint(config["daily_min"], config["daily_max"])
         new_balance = await db.add_coins(interaction.guild_id, interaction.user.id, amount)
         await db.set_last_daily(interaction.guild_id, interaction.user.id, now.isoformat())
-
+        # racha daily 1-7 + caja diaria
+        streak_msg = ""
+        try:
+            from cogs.streaks import update_daily_streak, DAILY_STREAK_REWARDS
+            streak, s_coins, s_xp, label = await update_daily_streak(interaction.guild_id, interaction.user.id)
+            if s_coins or s_xp:
+                if s_coins:
+                    new_balance = await db.add_coins(interaction.guild_id, interaction.user.id, s_coins, reason=f"streak:{streak}")
+                if s_xp:
+                    from utils.levels_engine import award_xp
+                    await award_xp(interaction.guild, interaction.user, s_xp)
+                streak_msg = f"\n🔥 **Racha {label}** +{s_coins} coins +{s_xp} XP ({streak}/7)"
+                if streak == 7:
+                    streak_msg += "\n💎 ¡CAJA GRANDE día 7! (1.000 coins + 500 XP ya incluidos)"
+            else:
+                # ya reclamó streak hoy (mismo día) - no duplicar
+                pass
+            # también actualiza racha de actividad general
+            from cogs.streaks import update_activity_streak
+            await update_activity_streak(interaction.guild_id, interaction.user.id)
+        except Exception as e:
+            try: print(f"[daily] streak fail {e}")
+            except: pass
         await interaction.response.send_message(
-            embed=success_embed(f"💰 Has recibido **{amount}** SoulCoins.\n👛 Saldo actual: **{new_balance}**", title="🎁 Daily reclamado")
+            embed=success_embed(f"💰 Has recibido **{amount}** SoulCoins.{streak_msg}\n👛 Saldo actual: **{new_balance}**", title="🎁 Daily reclamado")
         )
 
     @app_commands.command(name="work", description="Trabaja con minijuego (minero/pescador)")
