@@ -220,6 +220,28 @@ async def init_db():
             last_work TEXT,
             PRIMARY KEY (guild_id, user_id, job)
         );
+
+        CREATE TABLE IF NOT EXISTS giveaways (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            channel_id INTEGER,
+            message_id INTEGER,
+            host_id INTEGER,
+            prize TEXT,
+            description TEXT,
+            winners_count INTEGER DEFAULT 1,
+            ends_at TEXT,
+            status TEXT DEFAULT 'active',
+            requirements TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS giveaway_entries (
+            giveaway_id INTEGER,
+            user_id INTEGER,
+            entered_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (giveaway_id, user_id)
+        );
         """
     )
     # Migración simple para bases de datos ya existentes (añade columnas nuevas si faltan)
