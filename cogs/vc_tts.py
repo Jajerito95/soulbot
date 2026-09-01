@@ -83,9 +83,9 @@ class VCTtsCog(commands.Cog):
         content = message.content.strip()
         if content.startswith("/") or content.startswith("!") or len(content) > 200:
             return
-        # cola por guild para no solapar audios
+        # cola por guild para no solapar audios - solo contenido para ser instant como /vc tts
         async with self._lock(guild.id):
-            await self._speak(guild, f"{message.author.display_name} dice: {content}")
+            await self._speak(guild, content)
 
     async def _speak(self, guild: discord.Guild, text: str):
         vc = guild.voice_client
@@ -93,79 +93,7 @@ class VCTtsCog(commands.Cog):
             return
         while vc.is_playing():
             await asyncio.sleep(0.4)
-        # --- PIPE STREAMING (instant ~0.7s) para ElevenLabs ---
-        eleven_key, eleven_voice = _eleven_cfg()
-        if eleven_key:
-            try:
-                import aiohttp, subprocess, shutil
-                if not shutil.which("ffmpeg"):
-                    print("[vc_tts] ffmpeg missing")
-                else:
-                    # ffmpeg: mp3 stdin -> s16le stdout para discord PCMAudio
-                    proc = subprocess.Popen(
-                        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1"],
-                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0
-                    )
-                    loop = asyncio.get_running_loop()
-                    success = False
-                    async def _feed():
-                        nonlocal success
-                        try:
-                            async with aiohttp.ClientSession() as sess:
-                                async with sess.post(
-                                    f"https://api.elevenlabs.io/v1/text-to-speech/{eleven_voice}/stream?optimize_streaming_latency=4",
-                                    headers={"xi-api-key": eleven_key, "Content-Type": "application/json"},
-                                    json={"text": text, "model_id": "eleven_multilingual_v2", "voice_settings": {"stability": 0.6, "similarity_boost": 0.75, "style": 0.0, "use_speaker_boost": True}},
-                                    timeout=aiohttp.ClientTimeout(total=12),
-                                ) as resp:
-                                    if resp.status != 200:
-                                        try: print(f"[vc_tts] Eleven {resp.status}: {(await resp.text())[:150]}")
-                                        except: pass
-                                        try: proc.stdin.close()
-                                        except: pass
-                                        return
-                                    async for chunk in resp.content.iter_chunked(2048):
-                                        if chunk:
-                                            await loop.run_in_executor(None, proc.stdin.write, chunk)
-                                    try: proc.stdin.close()
-                                    except: pass
-                                    success = True
-                        except Exception as e:
-                            try: print(f"[vc_tts] pipe feed fail: {e}")
-                            except: pass
-                            try: proc.stdin.close()
-                            except: pass
-                    feed_task = asyncio.create_task(_feed())
-                    # deja que ffmpeg bufferice 200ms antes de play
-                    await asyncio.sleep(0.35)
-                    # si el proc murió rápido, fallback a file
-                    if proc.poll() is not None and not success:
-                        print("[vc_tts] pipe ffmpeg died, fallback to file")
-                    else:
-                        try:
-                            source = discord.PCMAudio(proc.stdout)
-                            source = discord.PCMVolumeTransformer(source, volume=0.9)
-                            print(f"[vc_tts] pipe streaming '{text[:30]}' in {guild.name}")
-                            vc.play(source, after=lambda e: print(f"[vc_tts] pipe after: {e}"))
-                            while vc.is_playing():
-                                await asyncio.sleep(0.2)
-                            await feed_task
-                            try: proc.terminate()
-                            except: pass
-                            try: proc.wait(timeout=1)
-                            except: pass
-                            if success:
-                                print("[vc_tts] pipe playback finished")
-                                return
-                        except Exception as e:
-                            try: print(f"[vc_tts] pipe play fail: {e}")
-                            except: pass
-                            try: proc.terminate()
-                            except: pass
-            except Exception as e:
-                try: print(f"[vc_tts] pipe setup fail: {e}", flush=True)
-                except: pass
-        # --- EDGE-TTS PIPE (free, español instant) ---
+        # --- EDGE-TTS PIPE (free, español instant) -> primero para no pagar 402 delay ---
         try:
             import shutil, subprocess
             edge_voice = os.getenv("EDGE_TTS_VOICE", "es-ES-AlvaroNeural")
@@ -195,7 +123,7 @@ class VCTtsCog(commands.Cog):
                             try: proc2.stdin.close()
                             except: pass
                     edge_task = asyncio.create_task(_edge_feed())
-                    await asyncio.sleep(0.25)
+                    await asyncio.sleep(0.2)
                     if proc2.poll() is None or edge_success:
                         try:
                             source = discord.PCMAudio(proc2.stdout)
@@ -224,6 +152,75 @@ class VCTtsCog(commands.Cog):
                     except: pass
         except Exception:
             pass
+        # --- ELEVENLABS PIPE (paid, solo si edge falla) ---
+        eleven_key, eleven_voice = _eleven_cfg()
+        if eleven_key:
+            try:
+                import aiohttp, subprocess, shutil
+                if not shutil.which("ffmpeg"):
+                    print("[vc_tts] ffmpeg missing", flush=True)
+                else:
+                    proc = subprocess.Popen(
+                        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1"],
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0
+                    )
+                    loop = asyncio.get_running_loop()
+                    success = False
+                    async def _feed():
+                        nonlocal success
+                        try:
+                            async with aiohttp.ClientSession() as sess:
+                                async with sess.post(
+                                    f"https://api.elevenlabs.io/v1/text-to-speech/{eleven_voice}/stream?optimize_streaming_latency=4",
+                                    headers={"xi-api-key": eleven_key, "Content-Type": "application/json"},
+                                    json={"text": text, "model_id": "eleven_multilingual_v2", "voice_settings": {"stability": 0.6, "similarity_boost": 0.75, "style": 0.0, "use_speaker_boost": True}},
+                                    timeout=aiohttp.ClientTimeout(total=12),
+                                ) as resp:
+                                    if resp.status != 200:
+                                        try: print(f"[vc_tts] Eleven {resp.status}: {(await resp.text())[:150]}", flush=True)
+                                        except: pass
+                                        try: proc.stdin.close()
+                                        except: pass
+                                        return
+                                    async for chunk in resp.content.iter_chunked(2048):
+                                        if chunk:
+                                            await loop.run_in_executor(None, proc.stdin.write, chunk)
+                                    try: proc.stdin.close()
+                                    except: pass
+                                    success = True
+                        except Exception as e:
+                            try: print(f"[vc_tts] pipe feed fail: {e}", flush=True)
+                            except: pass
+                            try: proc.stdin.close()
+                            except: pass
+                    feed_task = asyncio.create_task(_feed())
+                    await asyncio.sleep(0.35)
+                    if proc.poll() is not None and not success:
+                        print("[vc_tts] pipe ffmpeg died, fallback to file", flush=True)
+                    else:
+                        try:
+                            source = discord.PCMAudio(proc.stdout)
+                            source = discord.PCMVolumeTransformer(source, volume=0.9)
+                            print(f"[vc_tts] pipe streaming '{text[:30]}' in {guild.name}", flush=True)
+                            vc.play(source, after=lambda e: print(f"[vc_tts] pipe after: {e}", flush=True))
+                            while vc.is_playing():
+                                await asyncio.sleep(0.2)
+                            await feed_task
+                            try: proc.terminate()
+                            except: pass
+                            try: proc.wait(timeout=1)
+                            except: pass
+                            if success:
+                                print("[vc_tts] pipe playback finished", flush=True)
+                                return
+                        except Exception as e:
+                            try: print(f"[vc_tts] pipe play fail: {e}", flush=True)
+                            except: pass
+                            try: proc.terminate()
+                            except: pass
+            except Exception as e:
+                try: print(f"[vc_tts] pipe setup fail: {e}", flush=True)
+                except: pass
         # --- FALLBACK FILE (gTTS o ElevenLabs sin pipe) ---
         audio_path = None
         try:
