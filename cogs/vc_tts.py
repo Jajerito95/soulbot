@@ -125,18 +125,26 @@ class VCTtsCog(commands.Cog):
                 return
             # reproduce con ffmpeg — Opus es más estable que PCM y evita entrecortado
             try:
+                # verifica ffmpeg existe
+                import shutil
+                if not shutil.which("ffmpeg"):
+                    print("[vc_tts] ffmpeg NO encontrado — instala ffmpeg en buildCommand")
                 # intenta Opus (menos delay) y fallback a PCM
                 try:
                     source = discord.FFmpegOpusAudio(audio_path, options="-loglevel quiet")
-                except Exception:
+                except Exception as ex:
+                    print(f"[vc_tts] Opus fail {ex}, fallback PCM")
                     source = discord.FFmpegPCMAudio(audio_path, options="-loglevel quiet -ar 48000 -ac 2")
-                # volumen 100% sin distorsión
-                source = discord.PCMVolumeTransformer(source, volume=0.9)
+                # volumen 100% sin distorsión (Opus no necesita transformer, PCM sí)
+                if isinstance(source, discord.FFmpegPCMAudio):
+                    source = discord.PCMVolumeTransformer(source, volume=0.9)
+                print(f"[vc_tts] playing {audio_path} ({len(open(audio_path,'rb').read())} bytes) in {guild.name}")
                 vc.play(source)
                 while vc.is_playing():
                     await asyncio.sleep(0.25)
-            except discord.ClientException:
-                pass
+                print("[vc_tts] playback finished")
+            except discord.ClientException as ce:
+                print(f"[vc_tts] ClientException: {ce}")
             except Exception as e:
                 try: print(f"[vc_tts] play fail: {e}")
                 except: pass
