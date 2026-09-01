@@ -178,7 +178,7 @@ class VCTtsCog(commands.Cog):
                                 audio_path = f"/tmp/tts_{guild.id}.mp3"
                                 open(audio_path, "wb").write(data)
                             else:
-                                try: print(f"[vc_tts] ElevenLabs file {r.status}: {await r.text()[:150]}")
+                                try: print(f"[vc_tts] ElevenLabs file {r.status}: {(await r.text())[:150]}")
                                 except: pass
                 except Exception as e:
                     try: print(f"[vc_tts] ElevenLabs file fail: {e}")
