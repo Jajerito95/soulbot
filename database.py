@@ -242,6 +242,28 @@ async def init_db():
             entered_at TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (giveaway_id, user_id)
         );
+
+        CREATE TABLE IF NOT EXISTS user_missions (
+            guild_id INTEGER,
+            user_id INTEGER,
+            date TEXT,
+            mission_id TEXT,
+            type TEXT,
+            goal INTEGER,
+            progress INTEGER DEFAULT 0,
+            claimed INTEGER DEFAULT 0,
+            reward_coins INTEGER DEFAULT 0,
+            reward_xp INTEGER DEFAULT 0,
+            description TEXT,
+            PRIMARY KEY (guild_id, user_id, date, mission_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS guild_kv (
+            guild_id INTEGER,
+            key TEXT,
+            value TEXT,
+            PRIMARY KEY (guild_id, key)
+        );
         """
     )
     # Migración simple para bases de datos ya existentes (añade columnas nuevas si faltan)
