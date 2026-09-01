@@ -43,7 +43,14 @@ class VCTtsCog(commands.Cog):
                 return
             try:
                 await after.channel.connect(timeout=5.0, self_deaf=False)
-            except discord.ClientException:
+            except discord.ClientException as e:
+                # PyNaCl missing -> avisa sin crashear
+                if "PyNaCl" in str(e):
+                    try:
+                        # intenta avisar en el canal de sistema si existe
+                        if guild.system_channel:
+                            await guild.system_channel.send(embed=error_embed("❌ Voice necesita `PyNaCl`. Añade `PyNaCl` a requirements.txt y redeploya."))
+                    except: pass
                 pass
             except Exception:
                 pass
