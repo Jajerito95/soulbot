@@ -264,6 +264,31 @@ async def init_db():
             value TEXT,
             PRIMARY KEY (guild_id, key)
         );
+
+        CREATE TABLE IF NOT EXISTS relampago_config (
+            guild_id INTEGER PRIMARY KEY,
+            channel_id INTEGER,
+            enabled INTEGER DEFAULT 1,
+            min_hours INTEGER DEFAULT 1,
+            max_hours INTEGER DEFAULT 4,
+            last_spawn TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS relampago_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            channel_id INTEGER,
+            ends_at TEXT,
+            status TEXT DEFAULT 'active',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS relampago_claims (
+            event_id INTEGER,
+            user_id INTEGER,
+            claimed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (event_id, user_id)
+        );
         """
     )
     # Migración simple para bases de datos ya existentes (añade columnas nuevas si faltan)
