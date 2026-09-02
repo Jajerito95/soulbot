@@ -319,6 +319,12 @@ async def init_db():
             damage INTEGER DEFAULT 0,
             PRIMARY KEY (event_id, user_id)
         );
+
+        CREATE TABLE IF NOT EXISTS boss_config (
+            guild_id INTEGER PRIMARY KEY,
+            channel_id INTEGER,
+            enabled INTEGER DEFAULT 1
+        );
         """
     )
     # Migración simple para bases de datos ya existentes (añade columnas nuevas si faltan)

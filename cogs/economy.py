@@ -152,6 +152,7 @@ class EconomyCog(commands.Cog):
 
     @app_commands.command(name="daily", description="Reclama tu recompensa diaria de SoulCoins")
     async def daily(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
         last = await db.get_last_daily(interaction.guild_id, interaction.user.id)
         now = datetime.datetime.utcnow()
 
@@ -162,8 +163,8 @@ class EconomyCog(commands.Cog):
                 remaining = datetime.timedelta(hours=DAILY_COOLDOWN_HOURS) - elapsed
                 hours = int(remaining.total_seconds() // 3600)
                 minutes = int((remaining.total_seconds() % 3600) // 60)
-                await interaction.response.send_message(
-                    embed=error_embed(f"Ya reclamaste tu daily. Vuelve en **{hours}h {minutes}m**."), ephemeral=True
+                await interaction.followup.send(
+                    embed=error_embed(f"Ya reclamaste tu daily. Vuelve en **{hours}h {minutes}m**.\nUsa `/racha reset` si eres Staff para reiniciar."), ephemeral=True
                 )
                 return
 
@@ -186,16 +187,13 @@ class EconomyCog(commands.Cog):
                 streak_msg = f"\n🔥 **Racha {label}** +{s_coins} coins +{s_xp} XP ({streak}/7)"
                 if streak == 7:
                     streak_msg += "\n💎 ¡CAJA GRANDE día 7! (1.000 coins + 500 XP ya incluidos)"
-            else:
-                # ya reclamó streak hoy (mismo día) - no duplicar
-                pass
             # también actualiza racha de actividad general
             from cogs.streaks import update_activity_streak
             await update_activity_streak(interaction.guild_id, interaction.user.id)
         except Exception as e:
-            try: print(f"[daily] streak fail {e}")
+            try: print(f"[daily] streak fail {e}", flush=True)
             except: pass
-        await interaction.response.send_message(
+        await interaction.followup.send(
             embed=success_embed(f"💰 Has recibido **{amount}** SoulCoins.{streak_msg}\n👛 Saldo actual: **{new_balance}**", title="🎁 Daily reclamado")
         )
 

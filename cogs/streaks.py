@@ -121,5 +121,19 @@ class StreaksCog(commands.Cog):
         lines = [f"**{i+1}.** <@{uid}> — **{streak}** días" for i, (uid, streak) in enumerate(rows)]
         await interaction.response.send_message(embed=base_embed("\n".join(lines), COLOR, title="🏆 Top Rachas Daily"))
 
+    @streaks.command(name="reset", description="Resetea racha y cooldown daily (Staff o propio)")
+    @app_commands.describe(usuario="Usuario a resetear (Staff puede elegir otro, vacío = tú)")
+    async def reset(self, interaction: discord.Interaction, usuario: Optional[discord.Member]=None):
+        target = usuario or interaction.user
+        # solo staff puede resetear a otro
+        if target.id != interaction.user.id and not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message(embed=error_embed("Solo Staff puede resetear a otro."), ephemeral=True)
+            return
+        await db.db().execute("DELETE FROM streaks WHERE guild_id=? AND user_id=?", (interaction.guild_id, target.id))
+        # resetea cooldown daily (economy.last_daily)
+        await db.db().execute("UPDATE economy SET last_daily=NULL WHERE guild_id=? AND user_id=?", (interaction.guild_id, target.id))
+        await db.db().commit()
+        await interaction.response.send_message(embed=success_embed(f"Racha y cooldown de {target.mention} reseteados. Puede usar `/daily` de nuevo.", title="🔄 Reset"), ephemeral=True)
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(StreaksCog(bot))
