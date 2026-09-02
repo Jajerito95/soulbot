@@ -62,7 +62,7 @@ async def get_effective_multiplier(guild_id: int, user_id: int) -> float:
     return multiplier
 
 
-async def award_xp(guild: discord.Guild, member: discord.Member, base_amount: int, log: bool = True, apply_multiplier: bool = True) -> dict:
+async def award_xp(guild: discord.Guild, member: discord.Member, base_amount: int, log: bool = True, apply_multiplier: bool = True, _boss_reward: bool = False) -> dict:
     """Aplica multiplicadores, suma XP, detecta subida de nivel y aplica recompensas de rol."""
     multiplier = await get_effective_multiplier(guild.id, member.id) if apply_multiplier else 1.0
     amount = round(base_amount * multiplier)
@@ -97,6 +97,7 @@ async def award_xp(guild: discord.Guild, member: discord.Member, base_amount: in
     return {
         "amount": amount, "new_xp": new_xp, "new_level": new_level,
         "leveled_up": leveled_up, "new_roles": new_roles, "coins_awarded": coins_awarded,
+        "_boss_reward": _boss_reward,
     }
 
 

@@ -124,7 +124,14 @@ class MissionsView(discord.ui.View):
             guild = interaction.guild
             member = guild.get_member(self.user_id) or await guild.fetch_member(self.user_id)
             if member:
-                await award_xp(guild, member, total_xp, log=True)
+                result = await award_xp(guild, member, total_xp, log=True)
+                # boss damage: XP × 5
+                try:
+                    boss_cog = interaction.client.get_cog("BossCog")
+                    if boss_cog:
+                        await boss_cog._handle_xp_damage(guild.id, self.user_id, result["amount"])
+                except Exception:
+                    pass
         # check bonus all 5 claimed?
         cur2 = await db.db().execute("SELECT COUNT(*) FROM user_missions WHERE guild_id=? AND user_id=? AND date=? AND claimed=1", (self.guild_id, self.user_id, date))
         claimed_cnt = (await cur2.fetchone())[0]
@@ -139,7 +146,14 @@ class MissionsView(discord.ui.View):
                 guild = interaction.guild
                 member = guild.get_member(self.user_id) or await guild.fetch_member(self.user_id)
                 if member:
-                    await award_xp(guild, member, b_xp, log=True)
+                    result = await award_xp(guild, member, b_xp, log=True)
+                    # boss damage: XP × 5
+                    try:
+                        boss_cog = interaction.client.get_cog("BossCog")
+                        if boss_cog:
+                            await boss_cog._handle_xp_damage(guild.id, self.user_id, result["amount"])
+                    except Exception:
+                        pass
                 await db.db().execute("INSERT OR REPLACE INTO guild_kv (guild_id, key, value) VALUES (?,?,?)", (self.guild_id, f"mission_bonus_{self.user_id}_{date}", "1"))
                 await db.db().commit()
                 bonus_msg = f"\n\n🎉 ¡**BONUS 5/5**! Caja extra {b_rarity} +{b_coins} coins +{b_xp} XP"

@@ -162,6 +162,14 @@ class LevelsCog(commands.Cog):
         result = await award_xp(message.guild, message.author, amount)
         if result["leveled_up"]:
             await self._announce_levelup(message.guild, message.author, result, message.channel)
+        # boss damage: XP × 5 (skip si viene del boss reward para evitar loop)
+        try:
+            if not result.get("_boss_reward"):
+                boss_cog = self.bot.get_cog("BossCog")
+                if boss_cog:
+                    await boss_cog._handle_xp_damage(message.guild.id, message.author.id, result["amount"])
+        except Exception:
+            pass
 
     @tasks.loop(minutes=1)
     async def voice_xp_loop(self):
@@ -182,6 +190,14 @@ class LevelsCog(commands.Cog):
                     result = await award_xp(guild, member, config["voice_xp_per_minute"])
                     if result["leveled_up"]:
                         await self._announce_levelup(guild, member, result, None)
+                    # boss damage: XP × 5 (skip si boss reward)
+                    try:
+                        if not result.get("_boss_reward"):
+                            boss_cog = self.bot.get_cog("BossCog")
+                            if boss_cog:
+                                await boss_cog._handle_xp_damage(guild.id, member.id, result["amount"])
+                    except Exception:
+                        pass
 
     @voice_xp_loop.before_loop
     async def before_voice_loop(self):

@@ -183,7 +183,14 @@ class EconomyCog(commands.Cog):
                     new_balance = await db.add_coins(interaction.guild_id, interaction.user.id, s_coins, reason=f"streak:{streak}")
                 if s_xp:
                     from utils.levels_engine import award_xp
-                    await award_xp(interaction.guild, interaction.user, s_xp)
+                    result = await award_xp(interaction.guild, interaction.user, s_xp)
+                    # boss damage: XP × 5
+                    try:
+                        boss_cog = self.bot.get_cog("BossCog")
+                        if boss_cog:
+                            await boss_cog._handle_xp_damage(interaction.guild_id, interaction.user.id, result["amount"])
+                    except Exception:
+                        pass
                 streak_msg = f"\n🔥 **Racha {label}** +{s_coins} coins +{s_xp} XP ({streak}/7)"
                 if streak == 7:
                     streak_msg += "\n💎 ¡CAJA GRANDE día 7! (1.000 coins + 500 XP ya incluidos)"
@@ -465,6 +472,13 @@ class EconomyCog(commands.Cog):
             desc = f"⭐ Compraste **{item['name']}** — +{item['xp_amount']} XP instantánea."
             if result["leveled_up"]:
                 desc += f"\n🎉 ¡Subiste a nivel **{result['new_level']}**!"
+            # boss damage: XP × 5
+            try:
+                boss_cog = self.bot.get_cog("BossCog")
+                if boss_cog:
+                    await boss_cog._handle_xp_damage(interaction.guild_id, interaction.user.id, result["amount"])
+            except Exception:
+                pass
             await interaction.response.send_message(embed=success_embed(desc))
 
         else:  # boost
