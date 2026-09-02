@@ -101,14 +101,31 @@ class StreaksCog(commands.Cog):
         if not rows:
             await interaction.response.send_message(embed=error_embed("Sin rachas aún. Habla, entra a VC o haz /daily."), ephemeral=True)
             return
+        # Pillow hermoso
+        try:
+            from utils.card_renderer import render_streaks_overview
+            data = []
+            for typ, cur_s, max_s, last in rows:
+                label = "🔥 Actividad" if typ=="activity" else "📅 Daily"
+                data.append({"label": f"{label} • {last}", "current": cur_s, "max": max_s})
+            # añade próximo daily
+            for typ, cur_s, _, _ in rows:
+                if typ=="daily":
+                    nxt = cur_s + 1 if cur_s < 7 else 1
+                    coins, xp, lbl = DAILY_STREAK_REWARDS[nxt]
+                    data.append({"label": f"→ Próximo {lbl} +{coins}c +{xp}xp", "current": 0, "max": 0})
+            buf = await render_streaks_overview(target.display_name, target.display_avatar.url, data)
+            file = discord.File(buf, filename="rachas.png")
+            embed = base_embed("", COLOR, title=f"🔥 Rachas de {target.display_name}")
+            embed.set_image(url="attachment://rachas.png")
+            await interaction.response.send_message(embed=embed, file=file, ephemeral=True)
+            return
+        except Exception:
+            pass
         lines = []
         for typ, cur_s, max_s, last in rows:
             label = "🔥 Actividad (mensaje/misión/voz)" if typ=="activity" else "📅 Daily"
             lines.append(f"{label}: **{cur_s}** días (récord {max_s}) — último {last}")
-            if typ=="daily":
-                nxt = cur_s + 1 if cur_s < 7 else 1
-                coins, xp, lbl = DAILY_STREAK_REWARDS[nxt]
-                lines.append(f"  → Próximo {lbl}: +{coins} coins +{xp} XP")
         await interaction.response.send_message(embed=base_embed("\n".join(lines), COLOR, title=f"🔥 Rachas de {target.display_name}"), ephemeral=True)
 
     @streaks.command(name="top", description="Top rachas del server")

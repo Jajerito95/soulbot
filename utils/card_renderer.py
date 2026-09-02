@@ -602,6 +602,137 @@ async def render_suggestion(
     buf=io.BytesIO(); card.convert("RGB").save(buf, format="PNG"); buf.seek(0); return buf
 
 
+async def render_daily_streak(username: str, avatar_url: str, amount: int, streak: int, streak_coins: int, streak_xp: int, balance: int) -> io.BytesIO:
+    W, H = 800, 320
+    BG = (18, 20, 28)
+    base = Image.new("RGBA", (W, H), BG + (255,))
+    bdraw = ImageDraw.Draw(base)
+    for y in range(H):
+        t = y / H
+        r = int(18 + t*25); g = int(20 + t*15); b = int(28 + t*50)
+        bdraw.line([(0,y),(W,y)], fill=(r,g,b,255))
+    # streak bar 1-7
+    for i in range(7):
+        x0 = 24 + i * 106
+        x1 = x0 + 92
+        y0, y1 = 210, 250
+        col = (88,101,242,255) if i+1 <= streak else (55,58,63,255)
+        if i+1 == streak:
+            col = (255,199,60,255)
+        ImageDraw.Draw(base).rounded_rectangle([x0,y0,x1,y1], radius=12, fill=col)
+        try:
+            f = ImageFont.truetype(FONT_BOLD, 18)
+        except: f = ImageFont.load_default()
+        ImageDraw.Draw(base).text((x0+46, y0+20), f"{i+1}", font=f, fill=(255,255,255,255), anchor="mm")
+        if i+1 == 7:
+            ImageDraw.Draw(base).text((x0+46, y1+14), "GRANDE", font=ImageFont.truetype(FONT_REGULAR, 11) if os.path.exists(FONT_REGULAR) else f, fill=(255,199,60,255), anchor="mm")
+    mask = Image.new("L", (W,H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0,0,W,H], radius=24, fill=255)
+    card = Image.new("RGBA", (W,H), (0,0,0,0))
+    card.paste(base, (0,0), mask)
+    draw = ImageDraw.Draw(card)
+    # avatar
+    try:
+        data = await _download(avatar_url)
+        av = Image.open(io.BytesIO(data)).convert("RGBA").resize((80,80), Image.LANCZOS)
+    except: av = Image.new("RGBA", (80,80), (80,80,80,255))
+    am = Image.new("L", (80,80), 0); ImageDraw.Draw(am).ellipse((0,0,80,80), fill=255)
+    card.paste(av, (28,28), am)
+    draw.ellipse((28,28,108,108), outline=(255,255,255,40), width=2)
+    font_b = ImageFont.truetype(FONT_BOLD, 26) if os.path.exists(FONT_BOLD) else ImageFont.load_default()
+    font_r = ImageFont.truetype(FONT_REGULAR, 18) if os.path.exists(FONT_REGULAR) else ImageFont.load_default()
+    font_s = ImageFont.truetype(FONT_REGULAR, 14) if os.path.exists(FONT_REGULAR) else ImageFont.load_default()
+    draw.text((124, 36), _clean(username)[:20], font=font_b, fill=(255,255,255,255))
+    draw.text((124, 68), f"+{amount} SoulCoins +{streak_coins} streak +{streak_xp} XP", font=font_r, fill=(88,101,242,255))
+    draw.text((124, 96), f"Balance: {balance:,} • Racha {streak}/7", font=font_s, fill=(160,160,165,255))
+    draw.text((24, 180), f"🔥 RACHA DÍA {streak}/7  —  {'💎 CAJA GRANDE!' if streak==7 else f'+{streak_coins} coins'}", font=font_r, fill=(255,255,255,255))
+    draw.text((W//2, H-14), "SoulSeeker™ • Daily", font=font_s, fill=(110,114,120,255), anchor="mm")
+    buf = io.BytesIO(); card.convert("RGB").save(buf, format="PNG"); buf.seek(0); return buf
+
+async def render_streaks_overview(username: str, avatar_url: str, streaks: list[dict]) -> io.BytesIO:
+    # streaks: list of {type, current, max, label}
+    W, H = 700, 260 + len(streaks)*54
+    BG = (22, 24, 30)
+    base = Image.new("RGBA", (W, H), BG + (255,))
+    bdraw = ImageDraw.Draw(base)
+    for y in range(H):
+        t=y/H
+        bdraw.line([(0,y),(W,y)], fill=(int(22+t*12), int(24+t*10), int(30+t*20),255))
+    mask = Image.new("L", (W,H), 0); ImageDraw.Draw(mask).rounded_rectangle([0,0,W,H], radius=22, fill=255)
+    card = Image.new("RGBA", (W,H), (0,0,0,0)); card.paste(base,(0,0),mask)
+    draw = ImageDraw.Draw(card)
+    try:
+        data = await _download(avatar_url)
+        av = Image.open(io.BytesIO(data)).convert("RGBA").resize((64,64), Image.LANCZOS)
+    except: av = Image.new("RGBA", (64,64), (80,80,80,255))
+    am = Image.new("L", (64,64), 0); ImageDraw.Draw(am).ellipse((0,0,64,64), fill=255)
+    card.paste(av, (24,24), am)
+    font_b = ImageFont.truetype(FONT_BOLD, 22) if os.path.exists(FONT_BOLD) else ImageFont.load_default()
+    font_r = ImageFont.truetype(FONT_REGULAR, 16) if os.path.exists(FONT_REGULAR) else ImageFont.load_default()
+    draw.text((104, 36), _clean(username)[:18], font=font_b, fill=(255,255,255,255))
+    draw.text((104, 62), "Rachas", font=font_r, fill=(160,160,165,255))
+    y=110
+    for s in streaks:
+        label = s.get("label","")
+        cur = s.get("current",0); mx = s.get("max",0)
+        draw.rounded_rectangle([24, y, W-24, y+44], radius=12, fill=(38,40,45,255), outline=(55,58,63,40), width=1)
+        draw.text((32, y+10), label[:28], font=font_r, fill=(255,255,255,255))
+        draw.text((W-24, y+10), f"{cur} días (récord {mx})", font=font_r, fill=(88,101,242,255), anchor="rm")
+        y+=54
+    draw.text((W//2, H-14), "SoulSeeker™ • Rachas", font=font_r, fill=(110,114,120,255), anchor="mm")
+    buf=io.BytesIO(); card.convert("RGB").save(buf, format="PNG"); buf.seek(0); return buf
+
+async def render_boss_card(boss_name: str, current_hp: int, max_hp: int, top: list[tuple[str,int]], image_url: str | None = None) -> io.BytesIO:
+    W, H = 900, 360
+    BG = (20, 16, 16)
+    base = Image.new("RGBA", (W,H), BG+(255,))
+    bdraw = ImageDraw.Draw(base)
+    for y in range(H):
+        t=y/H
+        bdraw.line([(0,y),(W,y)], fill=(int(20+t*30), int(16+t*10), int(16+t*10),255))
+    # boss image left
+    if image_url:
+        try:
+            data = await _download(image_url)
+            bimg = Image.open(io.BytesIO(data)).convert("RGBA").resize((260,260), Image.LANCZOS)
+            # rounded
+            m = Image.new("L", (260,260), 0); ImageDraw.Draw(m).rounded_rectangle([0,0,260,260], radius=28, fill=255)
+            base.paste(bimg, (28,48), m)
+            ImageDraw.Draw(base).rounded_rectangle([28,48,288,308], radius=28, outline=(231,76,60,180), width=3)
+        except: pass
+    mask = Image.new("L", (W,H), 0); ImageDraw.Draw(mask).rounded_rectangle([0,0,W,H], radius=28, fill=255)
+    card = Image.new("RGBA", (W,H), (0,0,0,0)); card.paste(base,(0,0),mask)
+    draw = ImageDraw.Draw(card)
+    font_b = ImageFont.truetype(FONT_BOLD, 32) if os.path.exists(FONT_BOLD) else ImageFont.load_default()
+    font_r = ImageFont.truetype(FONT_REGULAR, 18) if os.path.exists(FONT_REGULAR) else ImageFont.load_default()
+    font_s = ImageFont.truetype(FONT_REGULAR, 14) if os.path.exists(FONT_REGULAR) else ImageFont.load_default()
+    tx = 320 if image_url else 28
+    draw.text((tx, 32), f"👹 {_clean(boss_name)[:22]}", font=font_b, fill=(255,255,255,255))
+    # HP bar
+    pct = current_hp / max_hp if max_hp else 0
+    bar_x, bar_y, bar_w, bar_h = tx, 80, W - tx - 28, 26
+    ImageDraw.Draw(card).rounded_rectangle([bar_x, bar_y, bar_x+bar_w, bar_y+bar_h], radius=13, fill=(45,40,40,255), outline=(60,40,40,255), width=1)
+    fill_w = int(bar_w * pct)
+    if fill_w>4:
+        fimg = Image.new("RGBA", (fill_w, bar_h), (0,0,0,0))
+        fd = ImageDraw.Draw(fimg)
+        for x in range(fill_w):
+            t=x/max(1,fill_w)
+            r=int(231*(1-t)+255*t); g=int(76*(1-t)+100*t); b=int(60*(1-t)+60*t)
+            fd.line([(x,0),(x,bar_h)], fill=(r,g,b,255))
+        fm = Image.new("L", (fill_w, bar_h), 0); ImageDraw.Draw(fm).rounded_rectangle([0,0,fill_w,bar_h], radius=13, fill=255)
+        if pct<0.98: ImageDraw.Draw(fm).rectangle([fill_w-13,0,fill_w,bar_h], fill=255)
+        card.paste(fimg, (bar_x, bar_y), fm)
+    draw.text((bar_x+bar_w//2, bar_y+5), f"{int(pct*100)}%  {current_hp:,}/{max_hp:,}", font=font_s, fill=(255,255,255,255), anchor="mm")
+    # top
+    draw.text((tx, 122), "Top daño:", font=font_r, fill=(231,76,60,255))
+    y=150
+    for i,(name,dmg) in enumerate(top[:3]):
+        draw.text((tx, y), f"{i+1}. {_clean(name)[:16]} — {dmg:,}", font=font_r, fill=(255,255,255,255) if i==0 else (200,200,200,255))
+        y+=24
+    draw.text((W//2, H-14), "SoulSeeker™ • Boss Semanal", font=font_s, fill=(110,114,120,255), anchor="mm")
+    buf=io.BytesIO(); card.convert("RGB").save(buf, format="PNG"); buf.seek(0); return buf
+
 # Paleta de acentos por categoría (determinista por nombre, sin necesidad de guardar color en DB)
 CATEGORY_PALETTE = [
     "#2BBFB3",  # teal

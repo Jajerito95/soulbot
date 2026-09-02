@@ -193,6 +193,24 @@ class EconomyCog(commands.Cog):
         except Exception as e:
             try: print(f"[daily] streak fail {e}", flush=True)
             except: pass
+        # Pillow hermoso para daily
+        try:
+            from utils.card_renderer import render_daily_streak
+            # streak ya calculado arriba, si no existe usa 1
+            try:
+                s_day = streak  # type: ignore
+                s_coins_v = s_coins  # type: ignore
+                s_xp_v = s_xp  # type: ignore
+            except:
+                s_day, s_coins_v, s_xp_v = 1, 50, 50
+            buf = await render_daily_streak(interaction.user.display_name, interaction.user.display_avatar.url, amount, s_day, s_coins_v, s_xp_v, new_balance)
+            file = discord.File(buf, filename="daily.png")
+            embed = success_embed(f"💰 **{amount}** SoulCoins{streak_msg}\n👛 Saldo: **{new_balance}**", title="🎁 Daily reclamado")
+            embed.set_image(url="attachment://daily.png")
+            await interaction.followup.send(embed=embed, file=file)
+            return
+        except Exception:
+            pass
         await interaction.followup.send(
             embed=success_embed(f"💰 Has recibido **{amount}** SoulCoins.{streak_msg}\n👛 Saldo actual: **{new_balance}**", title="🎁 Daily reclamado")
         )

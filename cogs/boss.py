@@ -112,6 +112,26 @@ class BossCog(commands.Cog):
             return
         cols = [d[0] for d in cur.description]
         boss = dict(zip(cols, row))
+        # Pillow hermoso
+        try:
+            from utils.card_renderer import render_boss_card
+            cur2 = await db.db().execute("SELECT user_id, damage FROM boss_damage WHERE event_id=? ORDER BY damage DESC LIMIT 3", (boss["id"],))
+            top_rows = await cur2.fetchall()
+            top_names = []
+            for uid, dmg in top_rows:
+                m = interaction.guild.get_member(uid)
+                name = m.display_name if m else f"User {uid}"
+                top_names.append((name, dmg))
+            buf = await render_boss_card(boss["boss_name"], int(boss["current_hp"]), int(boss["max_hp"]), top_names, boss["image_url"])
+            file = discord.File(buf, filename="boss.png")
+            pct = (int(boss["current_hp"]) / int(boss["max_hp"]) * 100) if int(boss["max_hp"]) else 0
+            bar = "▰"*int(12*pct/100) + "▱"*(12-int(12*pct/100))
+            embed = base_embed(f"{bar} `{boss['current_hp']:,}/{boss['max_hp']:,} HP` ({pct:.1f}%)", COLOR, title=f"👹 {boss['boss_name']}")
+            embed.set_image(url="attachment://boss.png")
+            await interaction.response.send_message(embed=embed, file=file)
+            return
+        except Exception:
+            pass
         pct = (int(boss["current_hp"]) / int(boss["max_hp"]) * 100) if int(boss["max_hp"]) else 0
         bar = "▰"*int(12*pct/100) + "▱"*(12-int(12*pct/100))
         cur2 = await db.db().execute("SELECT user_id, damage FROM boss_damage WHERE event_id=? ORDER BY damage DESC LIMIT 3", (boss["id"],))
