@@ -39,3 +39,7 @@ Pillow Cards Rediseñados (4/4):
   [x] Leaderboard — 700px wide, medals 44px con glow, barras 10px
 
 Fuentes: Outfit-Bold.ttf / Outfit-Regular.ttf (assets/fonts/)
+
+Bugs corregidos:
+  [x] relampago.py: import os (usaba _os alias pero referenciaba os)
+  Bot reconectado — relampago cog cargando correctamente
