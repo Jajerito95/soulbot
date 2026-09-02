@@ -2,6 +2,7 @@ from __future__ import annotations
 import datetime
 import random
 import os
+import io
 from typing import Optional
 
 import discord
@@ -232,7 +233,7 @@ class BossCog(commands.Cog):
         # generar Pillow y enviar
         ch = target_ch if isinstance(target_ch, discord.TextChannel) else interaction.channel
         pillow = await render_boss_pillow(nombre, hp, hp, [], imagen, 0)
-        file = discord.File(pillow, filename="boss.png") if pillow else None
+        file = discord.File(io.BytesIO(pillow), filename="boss.png") if pillow else None
 
         embed = base_embed(
             f"👹 **{nombre}** ha aparecido con **{hp:,} HP**\n"
@@ -328,7 +329,7 @@ class BossCog(commands.Cog):
             top_names, boss["image_url"], total_all
         )
         if pillow:
-            file = discord.File(pillow, filename="boss.png")
+            file = discord.File(io.BytesIO(pillow), filename="boss.png")
             pct = (int(boss["current_hp"]) / int(boss["max_hp"]) * 100) if int(boss["max_hp"]) else 0
             bar = "▰" * int(12 * pct / 100) + "▱" * (12 - int(12 * pct / 100))
             embed = base_embed(f"{bar} `{boss['current_hp']:,}/{boss['max_hp']:,} HP` ({pct:.1f}%)", COLOR, title=f"👹 {boss['boss_name']}")
@@ -418,7 +419,7 @@ class BossCog(commands.Cog):
         if not pillow:
             return
 
-        file = discord.File(pillow, filename="boss.png")
+        file = discord.File(io.BytesIO(pillow), filename="boss.png")
         pct = (int(boss["current_hp"]) / int(boss["max_hp"]) * 100) if int(boss["max_hp"]) else 0
         bar = "▰" * int(12 * pct / 100) + "▱" * (12 - int(12 * pct / 100))
         embed = base_embed(
