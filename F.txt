@@ -43,3 +43,11 @@ Fuentes: Outfit-Bold.ttf / Outfit-Regular.ttf (assets/fonts/)
 Bugs corregidos:
   [x] relampago.py: import os (usaba _os alias pero referenciaba os)
   Bot reconectado — relampago cog cargando correctamente
+
+Boss v2 — Sistema de Daño por XP:
+  [x] Eliminado botón ⚔️ Atacar (autoclick abusivo)
+  [x] Daño = XP ganada × 5 (messages, voice, daily, missions, shop XP)
+  [x] Auto-repost cada 5 mensajes en canal boss con Pillow actualizado
+  [x] Nuevo Pillow: nombre, imagen, HP bar, top3, recompensas a la derecha
+  [x] Anti-loop: boss reward XP no daña al boss (flag _boss_reward)
+  [x] Fuentes Outfit-Bold/Regular en boss card
