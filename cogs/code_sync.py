@@ -32,14 +32,14 @@ from config import (
 try:
     from utils.embeds import success_embed, error_embed, base_embed
 except Exception:  # pragma: no cover
-    def success_embed(title, desc, color=COLOR_SUCCESS):
-        return discord.Embed(title=title, description=desc, color=color)
+    def success_embed(description, title=None, guild=None):
+        return discord.Embed(title=title or "Éxito", description=description, color=COLOR_SUCCESS)
 
-    def error_embed(title, desc, color=COLOR_ERROR):
-        return discord.Embed(title=title, description=desc, color=color)
+    def error_embed(description, title=None, guild=None):
+        return discord.Embed(title=title or "Error", description=description, color=COLOR_ERROR)
 
-    def base_embed(title, desc, color=COLOR_INFO):
-        return discord.Embed(title=title, description=desc, color=color)
+    def base_embed(description, title=None, guild=None):
+        return discord.Embed(title=title, description=description, color=COLOR_INFO)
 
 
 def strip_codes(text: str) -> str:

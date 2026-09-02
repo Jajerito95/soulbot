@@ -119,6 +119,7 @@ class RelampagoView(discord.ui.View):
 
     @discord.ui.button(label="⚡ Reclamar (0/3)", style=discord.ButtonStyle.primary, custom_id="soulbot:relampago:0")
     async def claim_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
         try:
             eid = int(interaction.data["custom_id"].split(":")[-1])
         except:
@@ -127,12 +128,12 @@ class RelampagoView(discord.ui.View):
         cur = await db.db().execute("SELECT * FROM relampago_events WHERE id=?", (eid,))
         row = await cur.fetchone()
         if not row:
-            await interaction.response.send_message(embed=error_embed("Evento no encontrado o ya expirado."), ephemeral=True)
+            await interaction.followup.send(embed=error_embed("Evento no encontrado o ya expirado."))
             return
         cols = [d[0] for d in cur.description]
         ev = dict(zip(cols, row))
         if ev["status"] != "active":
-            await interaction.response.send_message(embed=error_embed("Este relámpago ya expiró."), ephemeral=True)
+            await interaction.followup.send(embed=error_embed("Este relámpago ya expiró."))
             return
         # check 5m window
         try:
@@ -140,32 +141,31 @@ class RelampagoView(discord.ui.View):
             if datetime.datetime.utcnow() > ends:
                 await db.db().execute("UPDATE relampago_events SET status='ended' WHERE id=?", (eid,))
                 await db.db().commit()
-                await interaction.response.send_message(embed=error_embed("¡Tarde! El relámpago ya se fue (5 min)."), ephemeral=True)
+                await interaction.followup.send(embed=error_embed("¡Tarde! El relámpago ya se fue (5 min)."))
                 return
         except: pass
         # check winners <3
         cur2 = await db.db().execute("SELECT COUNT(*) FROM relampago_claims WHERE event_id=?", (eid,))
         cnt = (await cur2.fetchone())[0]
         if cnt >= 3:
-            await interaction.response.send_message(embed=error_embed("Ya hay 3 ganadores, se agotó."), ephemeral=True)
+            await interaction.followup.send(embed=error_embed("Ya hay 3 ganadores, se agotó."))
             return
         # check already claimed
         cur3 = await db.db().execute("SELECT 1 FROM relampago_claims WHERE event_id=? AND user_id=?", (eid, interaction.user.id))
         if await cur3.fetchone():
-            await interaction.response.send_message(embed=error_embed("Ya reclamaste este relámpago."), ephemeral=True)
+            await interaction.followup.send(embed=error_embed("Ya reclamaste este relámpago."))
             return
         # check nivel >=3
         try:
             data = await db.get_level_data(interaction.guild_id, interaction.user.id)
             if int(data.get("level", 0)) < 3:
-                await interaction.response.send_message(embed=error_embed(f"Necesitas nivel **3** (tienes {data.get('level',0)}). Habla un poco más."), ephemeral=True)
+                await interaction.followup.send(embed=error_embed(f"Necesitas nivel **3** (tienes {data.get('level',0)}). Habla un poco más."))
                 return
         except: pass
         # award
         coins = random.randint(300, 800)
         # boost x2 30m
-        import datetime as dt
-        expires = (dt.datetime.utcnow() + dt.timedelta(minutes=30)).isoformat()
+        expires = (datetime.datetime.utcnow() + datetime.timedelta(minutes=30)).isoformat()
         await db.add_coins(interaction.guild_id, interaction.user.id, coins, reason=f"relampago:{eid}")
         await db.set_user_multiplier(interaction.guild_id, interaction.user.id, 2.0, expires)
         await db.db().execute("INSERT INTO relampago_claims (event_id, user_id) VALUES (?, ?)", (eid, interaction.user.id))
@@ -176,12 +176,8 @@ class RelampagoView(discord.ui.View):
         if new_cnt >= 3:
             button.disabled = True
             button.style = discord.ButtonStyle.secondary
-        try:
-            await interaction.response.edit_message(view=self)
-        except:
-            await interaction.response.send_message(embed=success_embed(f"¡Reclamado! +{coins} coins + boost x2 30m", title="⚡ Relámpago"), ephemeral=True)
-            return
-        await interaction.followup.send(embed=success_embed(f"¡Te llevaste el relámpago! ⚡\n+**{coins}** SoulCoins + **boost x2 30m**\nGanadores: {new_cnt}/3", title="⚡ ¡Reclamado!"), ephemeral=True)
+        await interaction.edit_original_response(view=self)
+        await interaction.followup.send(embed=success_embed(f"¡Te llevaste el relámpago! ⚡\n+**{coins}** SoulCoins + **boost x2 30m**\nGanadores: {new_cnt}/3", title="⚡ ¡Reclamado!"))
         # update embed footer
         try:
             if interaction.message and interaction.message.embeds:

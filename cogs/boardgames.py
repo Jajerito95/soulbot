@@ -109,6 +109,7 @@ class TicTacToeView(discord.ui.View):
     async def on_timeout(self):
         for child in self.children:
             child.disabled = True
+        self.stop()
 
 
 # ==================== 4 EN RAYA (Connect 4) ====================
@@ -215,6 +216,7 @@ class ConnectFourView(discord.ui.View):
     async def on_timeout(self):
         for child in self.children:
             child.disabled = True
+        self.stop()
 
 
 # ==================== PIEDRA, PAPEL O TIJERA ====================
@@ -279,6 +281,7 @@ class RPSView(discord.ui.View):
     async def on_timeout(self):
         for child in self.children:
             child.disabled = True
+        self.stop()
 
 
 # ==================== COG ====================

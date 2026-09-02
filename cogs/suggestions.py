@@ -79,7 +79,7 @@ class SuggestionView(discord.ui.View):
 
         if previous_vote == vote:
             # Ya votó lo mismo: no sumar de nuevo, solo confirmar en silencio.
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
             return
 
         field = "yes_votes" if vote == "yes" else "no_votes"

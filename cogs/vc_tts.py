@@ -82,7 +82,10 @@ class VCTtsCog(commands.Cog):
             me = guild.me
             if me.voice and me.voice.channel == before.channel:
                 if len([m for m in before.channel.members if not m.bot]) == 0:
-                    try: await me.voice.channel.guild.voice_client.disconnect()
+                    try:
+                        vc = me.voice.channel.guild.voice_client
+                        if vc:
+                            await vc.disconnect()
                     except: pass
                     self._last_speaker.pop(guild.id, None)
 
@@ -279,7 +282,8 @@ class VCTtsCog(commands.Cog):
                             if r.status == 200:
                                 data = await r.read()
                                 audio_path = f"/tmp/tts_{guild.id}.mp3"
-                                open(audio_path, "wb").write(data)
+                                with open(audio_path, "wb") as f:
+                                    f.write(data)
                             else:
                                 try: print(f"[vc_tts] ElevenLabs file {r.status}: {(await r.text())[:150]}")
                                 except: pass
@@ -304,7 +308,9 @@ class VCTtsCog(commands.Cog):
                     source = discord.FFmpegPCMAudio(audio_path, options="-loglevel quiet -ar 48000 -ac 2")
                 if isinstance(source, discord.FFmpegPCMAudio):
                     source = discord.PCMVolumeTransformer(source, volume=0.9)
-                print(f"[vc_tts] file playing {audio_path} ({len(open(audio_path,'rb').read())} bytes)")
+                with open(audio_path, 'rb') as _f:
+                    _fsize = len(_f.read())
+                print(f"[vc_tts] file playing {audio_path} ({_fsize} bytes)")
                 vc.play(source)
                 while vc.is_playing():
                     await asyncio.sleep(0.25)
@@ -362,9 +368,9 @@ class VCTtsCog(commands.Cog):
     @vc_group.command(name="debate", description="Inicia un debate/juego en tu VC actual")
     @app_commands.describe(tema="Tema del debate/juego")
     async def vc_debate(self, interaction: discord.Interaction, tema: str):
-        vc = interaction.guild.voice_client or (await (interaction.user.voice.channel.connect() if interaction.user.voice and interaction.user.voice.channel else None))
+        vc = interaction.guild.voice_client
         # si no hay vc, usa el del usuario
-        if not interaction.guild.voice_client:
+        if not vc:
             if not interaction.user.voice or not interaction.user.voice.channel:
                 await interaction.response.send_message(embed=error_embed("Únete a un VC primero."), ephemeral=True)
                 return

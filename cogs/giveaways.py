@@ -137,6 +137,7 @@ class GiveawayView(discord.ui.View):
 
     @discord.ui.button(label="🎉 Participar (0)", style=discord.ButtonStyle.success, custom_id="soulbot:giveaway:0")
     async def participar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
         # custom_id carries giveaway_id
         try:
             gid = int(interaction.data["custom_id"].split(":")[-1])
@@ -146,30 +147,30 @@ class GiveawayView(discord.ui.View):
         cur = await db.db().execute("SELECT * FROM giveaways WHERE id=?", (gid,))
         row = await cur.fetchone()
         if not row:
-            await interaction.response.send_message(embed=error_embed("Sorteo no encontrado o ya finalizado."), ephemeral=True)
+            await interaction.followup.send(embed=error_embed("Sorteo no encontrado o ya finalizado."))
             return
         cols = [d[0] for d in cur.description]
         gw = dict(zip(cols, row))
         if gw["status"] != "active":
-            await interaction.response.send_message(embed=error_embed("Este sorteo ya no está activo."), ephemeral=True)
+            await interaction.followup.send(embed=error_embed("Este sorteo ya no está activo."))
             return
         # check ends_at
         try:
             ends = datetime.datetime.fromisoformat(gw["ends_at"])
             if datetime.datetime.utcnow() >= ends:
-                await interaction.response.send_message(embed=error_embed("Este sorteo ya finalizó."), ephemeral=True)
+                await interaction.followup.send(embed=error_embed("Este sorteo ya finalizó."))
                 return
         except: pass
         # check already entered
         cur2 = await db.db().execute("SELECT 1 FROM giveaway_entries WHERE giveaway_id=? AND user_id=?", (gid, interaction.user.id))
         if await cur2.fetchone():
-            await interaction.response.send_message(embed=error_embed("Ya estás participando. ¡Suerte!"), ephemeral=True)
+            await interaction.followup.send(embed=error_embed("Ya estás participando. ¡Suerte!"))
             return
         # check requirements
         reqs = await _get_reqs(gw)
         ok, msg = await _check_requirements(interaction.user, interaction.guild, reqs)  # type: ignore
         if not ok:
-            await interaction.response.send_message(embed=error_embed(msg), ephemeral=True)
+            await interaction.followup.send(embed=error_embed(msg))
             return
         # insert
         try:
@@ -177,19 +178,15 @@ class GiveawayView(discord.ui.View):
             await db.db().commit()
         except Exception as e:
             if "UNIQUE" in str(e) or "PRIMARY" in str(e):
-                await interaction.response.send_message(embed=error_embed("Ya estás participando."), ephemeral=True)
+                await interaction.followup.send(embed=error_embed("Ya estás participando."))
                 return
             raise
         # update button count
         cur3 = await db.db().execute("SELECT COUNT(*) FROM giveaway_entries WHERE giveaway_id=?", (gid,))
         cnt = (await cur3.fetchone())[0]
         button.label = f"🎉 Participar ({cnt})"
-        try:
-            await interaction.response.edit_message(view=self)
-        except:
-            await interaction.response.send_message(embed=success_embed(f"¡Entraste al sorteo! Participantes: **{cnt}**"), ephemeral=True)
-            return
-        await interaction.followup.send(embed=success_embed(f"¡Participación registrada! 🎉\nParticipantes: **{cnt}**"), ephemeral=True)
+        await interaction.edit_original_response(view=self)
+        await interaction.followup.send(embed=success_embed(f"¡Participación registrada! 🎉\nParticipantes: **{cnt}**"))
         # also update embed count if possible
         try:
             if interaction.message and interaction.message.embeds:

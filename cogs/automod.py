@@ -1,10 +1,11 @@
 from __future__ import annotations
+import asyncio
 import re
 import time
 from collections import defaultdict, deque
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import database as db
 from utils.sanctions_engine import apply_sanction
@@ -36,6 +37,17 @@ class AutoModCog(commands.Cog):
         self.recent_messages: dict[int, deque] = defaultdict(lambda: deque(maxlen=10))
         self.recent_content: dict[int, deque] = defaultdict(lambda: deque(maxlen=10))
         self.ping_cache: dict[int, tuple[float, bool]] = {}
+        self._cache_cleanup.start()
+
+    def cog_unload(self):
+        self._cache_cleanup.cancel()
+
+    @tasks.loop(minutes=10)
+    async def _cache_cleanup(self):
+        cutoff = asyncio.get_event_loop().time() - 3600
+        expired = [mid for mid, (ts, _) in self.ping_cache.items() if ts < cutoff]
+        for mid in expired:
+            del self.ping_cache[mid]
 
     async def _category_enabled(self, guild_id: int, category: str) -> bool:
         config = await db.get_guild_config(guild_id)

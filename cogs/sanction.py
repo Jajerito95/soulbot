@@ -10,7 +10,7 @@ from database import get_guild_config, log_staff_action, get_user_sanctions
 from utils.embeds import success_embed, error_embed, base_embed
 from cogs.logs import log_embed
 from cogs.sanction_data import INFRACTIONS, infraction_choices, get_punishment
-from utils.sanctions_engine import apply_sanction, is_imgur, requires_evidence, punishment_label
+from utils.sanctions_engine import apply_sanction, requires_evidence, punishment_label
 import database as db
 from discord.ext import tasks
 from config import COLOR_ERROR

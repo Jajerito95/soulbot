@@ -286,7 +286,7 @@ async def do_close(interaction: discord.Interaction, reason: str):
     if entry:
         member = guild.get_member(entry["user_id"])
         if member:
-            new_channel = await _create_ticket_channel(guild, member, entry["category"], config)
+            new_channel = await _create_ticket_channel(guild, member, entry["category"], config, ping=False)
             try:
                 await member.send(f"🎫 Tu ticket ya está listo: {new_channel.jump_url}")
             except discord.Forbidden:

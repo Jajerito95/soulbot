@@ -849,3 +849,163 @@ def category_accent(label: str) -> str:
     """Color determinista por nombre de categoría — misma categoría siempre el mismo color."""
     index = sum(ord(c) for c in label) % len(CATEGORY_PALETTE)
     return CATEGORY_PALETTE[index]
+
+
+async def render_missions_card(
+    username: str,
+    avatar_url: str,
+    missions: list[dict],
+    claimed: int,
+    date_label: str,
+) -> io.BytesIO:
+    """
+    Tarjeta de misiones diarias (Pillow).
+    missions: lista de dicts con {description, progress, goal, claimed, reward_coins, reward_xp}
+    """
+    W = 934
+    ROW_H = 72
+    HEADER_H = 120
+    FOOTER_H = 40
+    H = HEADER_H + ROW_H * len(missions) + FOOTER_H
+
+    BG = (22, 24, 30)
+    accent = (88, 101, 242)
+    accent_light = (120, 140, 255)
+    gold = (255, 199, 60)
+    green = (87, 242, 135)
+
+    base = Image.new("RGBA", (W, H), BG + (255,))
+    bdraw = ImageDraw.Draw(base)
+    for y in range(H):
+        t = y / H
+        r = int(BG[0] + t * 12)
+        g = int(BG[1] + t * 10)
+        b = int(BG[2] + t * 20)
+        bdraw.line([(0, y), (W, y)], fill=(r, g, b, 255))
+
+    # diagonal accent sutil
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    odraw.polygon([(W - 220, 0), (W, 0), (W, H), (W - 380, H)], fill=accent + (30,))
+    base = Image.alpha_composite(base, overlay)
+
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, W, H], radius=28, fill=255)
+    card = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    card.paste(base, (0, 0), mask)
+    draw = ImageDraw.Draw(card)
+
+    # avatar con sombra
+    shadow = Image.new("RGBA", (80, 80), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).ellipse((0, 0, 80, 80), fill=(0, 0, 0, 60))
+    card.paste(shadow, (28, 22), shadow)
+    try:
+        data = await _download(avatar_url)
+        av = Image.open(io.BytesIO(data)).convert("RGBA").resize((70, 70), Image.LANCZOS)
+    except Exception:
+        av = Image.new("RGBA", (70, 70), (80, 80, 80, 255))
+    am = Image.new("L", (70, 70), 0)
+    ImageDraw.Draw(am).ellipse((0, 0, 70, 70), fill=255)
+    card.paste(av, (28, 22), am)
+    draw.ellipse((28, 22, 98, 92), outline=(255, 255, 255, 40), width=2)
+
+    try:
+        font_name = ImageFont.truetype(FONT_BOLD, 26)
+        font_title = ImageFont.truetype(FONT_BOLD, 22)
+        font_desc = ImageFont.truetype(FONT_REG, 17)
+        font_small = ImageFont.truetype(FONT_REG, 14)
+        font_status = ImageFont.truetype(FONT_BOLD, 14)
+    except Exception:
+        font_name = font_title = font_desc = font_small = font_status = ImageFont.load_default()
+
+    clean_name = _clean(username)[:22]
+    draw.text((110, 28), f"@{clean_name}", font=font_name, fill=(255, 255, 255, 255))
+    draw.text((110, 60), f"Misiones diarias • {date_label}", font=font_small, fill=(160, 160, 165, 255))
+
+    # progress indicator top-right
+    total = len(missions)
+    done = sum(1 for m in missions if int(m["progress"]) >= int(m["goal"]))
+    pill_text = f"{done}/{total}"
+    pill_w = int(draw.textlength(pill_text, font=font_status)) + 20
+    pill_x = W - pill_w - 24
+    draw.rounded_rectangle([pill_x, 30, pill_x + pill_w, 58], radius=14, fill=accent + (255,))
+    draw.text((pill_x + pill_w // 2, 38), pill_text, font=font_status, fill=(255, 255, 255, 255), anchor="mm")
+
+    # divider
+    draw.line([(24, HEADER_H - 10), (W - 24, HEADER_H - 10)], fill=(55, 58, 63, 255), width=1)
+
+    # mission rows
+    y = HEADER_H
+    for i, m in enumerate(missions):
+        prog = int(m["progress"])
+        goal = int(m["goal"])
+        is_claimed = int(m["claimed"]) == 1
+        is_done = prog >= goal
+
+        # row background
+        row_bg = (38, 40, 45, 255) if i % 2 == 0 else (32, 34, 38, 255)
+        if is_claimed:
+            row_bg = (30, 40, 35, 255)
+        elif is_done:
+            row_bg = (40, 42, 36, 255)
+        draw.rounded_rectangle([12, y + 2, W - 12, y + ROW_H - 6], radius=14, fill=row_bg, outline=(55, 58, 63, 30), width=1)
+
+        # status icon
+        if is_claimed:
+            status_icon = "✅"
+            status_color = green
+        elif is_done:
+            status_icon = "📦"
+            status_color = gold
+        else:
+            status_icon = "⏳"
+            status_color = accent
+        draw.text((28, y + 12), status_icon, font=font_status, fill=status_color + (255,))
+
+        # description
+        desc = _clean(m.get("description", ""))[:48]
+        draw.text((58, y + 10), desc, font=font_desc, fill=(255, 255, 255, 255))
+
+        # progress bar
+        bar_x, bar_y, bar_w, bar_h = 58, y + 36, W - 120, 14
+        draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], radius=7, fill=(45, 48, 54, 255))
+        ratio = min(1.0, prog / goal) if goal else 0
+        fill_w = int(bar_w * ratio)
+        if fill_w > 4:
+            fill_color = green if is_claimed else (gold if is_done else accent)
+            fill_img = Image.new("RGBA", (fill_w, bar_h), (0, 0, 0, 0))
+            fd = ImageDraw.Draw(fill_img)
+            for x in range(fill_w):
+                t = x / max(1, fill_w)
+                r = int(fill_color[0] * (1 - t) + min(255, fill_color[0] + 40) * t)
+                g = int(fill_color[1] * (1 - t) + min(255, fill_color[1] + 40) * t)
+                b = int(fill_color[2] * (1 - t) + min(255, fill_color[2] + 40) * t)
+                fd.line([(x, 0), (x, bar_h)], fill=(r, g, b, 255))
+            fm = Image.new("L", (fill_w, bar_h), 0)
+            ImageDraw.Draw(fm).rounded_rectangle([0, 0, fill_w, bar_h], radius=7, fill=255)
+            if ratio < 0.98:
+                ImageDraw.Draw(fm).rectangle([fill_w - 7, 0, fill_w, bar_h], fill=255)
+            card.paste(fill_img, (bar_x, bar_y), fm)
+
+        # progress text
+        prog_text = f"{prog}/{goal}"
+        draw.text((W - 24, y + 10), prog_text, font=font_small, fill=(200, 203, 208, 255), anchor="rm")
+
+        # reward text
+        reward_text = f"+{m.get('reward_coins', 0)} coins +{m.get('reward_xp', 0)} XP + caja"
+        draw.text((W - 24, y + 36), reward_text, font=font_small, fill=(130, 135, 145, 255), anchor="rm")
+
+        y += ROW_H
+
+    # bonus indicator
+    if done == 5 and claimed < 5:
+        draw.rounded_rectangle([24, y - 8, W - 24, y + 28], radius=12, fill=gold + (30,), outline=gold + (100,), width=1)
+        draw.text((W // 2, y + 10), "💎 ¡BONUS 5/5! Reclama todas las cajas", font=font_status, fill=gold + (255,), anchor="mm")
+
+    # footer
+    draw.text((W // 2, H - 16), "SoulSeeker™ • Misiones", font=font_small, fill=(110, 114, 120, 255), anchor="mm")
+
+    buf = io.BytesIO()
+    card.convert("RGB").save(buf, format="PNG")
+    buf.seek(0)
+    return buf

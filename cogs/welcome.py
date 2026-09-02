@@ -138,20 +138,20 @@ class WelcomeCog(commands.Cog):
         config = await get_guild_config(member.guild.id)
         # actualiza contador de invites (left)
         try:
-            await db().execute(
-                "UPDATE invites SET left_count = left_count + 1 WHERE guild_id = ? AND user_id IN (SELECT user_id FROM invites WHERE guild_id = ?)",
-                (member.guild.id, member.guild.id),
-            )
-            # intenta detectar quién invitó (no perfecto, pero mejor que nada)
-            inviter = None
-            try:
-                new_inv = await member.guild.invites()
-                old = self.invite_cache.get(member.guild.id, {})
-                # no fiable 100% en leave, pero mantenemos cache
-                self.invite_cache[member.guild.id] = {inv.code: inv.uses or 0 for inv in new_inv}
-            except Exception:
-                pass
-            await db().commit()
+            new_inv = await member.guild.invites()
+            old = self.invite_cache.get(member.guild.id, {})
+            inviter_id = None
+            for inv in new_inv:
+                if (inv.uses or 0) < old.get(inv.code, 0):
+                    inviter_id = inv.inviter.id if inv.inviter else None
+                    break
+            self.invite_cache[member.guild.id] = {inv.code: inv.uses or 0 for inv in new_inv}
+            if inviter_id:
+                await db().execute(
+                    "UPDATE invites SET left_count = left_count + 1 WHERE guild_id = ? AND user_id = ?",
+                    (member.guild.id, inviter_id),
+                )
+                await db().commit()
         except Exception:
             pass
         if not config.get("farewell_enabled") or not config.get("farewell_channel_id"):

@@ -159,11 +159,28 @@ class MissionsView(discord.ui.View):
                 bonus_msg = f"\n\n🎉 ¡**BONUS 5/5**! Caja extra {b_rarity} +{b_coins} coins +{b_xp} XP"
 
         await interaction.response.send_message(embed=success_embed(f"📦 Caja {rarity} abierta!\n+**{total_coins}** SoulCoins +**{total_xp}** XP\n*Misión:* {m['description']}{bonus_msg}", title="📦 Recompensa"), ephemeral=True)
-        # refresh embed
+        # refresh with Pillow
         try:
-            embed = await build_missions_embed(self.guild_id, self.user_id)
-            await interaction.message.edit(embed=embed, view=self)
-        except: pass
+            from utils.card_renderer import render_missions_card
+            missions = await get_missions(self.guild_id, self.user_id)
+            new_claimed = sum(1 for m in missions if int(m["claimed"]))
+            member = interaction.guild.get_member(self.user_id)
+            username = member.display_name if member else "User"
+            avatar = member.display_avatar.url if member else ""
+            buf = await render_missions_card(username, avatar, missions, new_claimed, today_str())
+            file = discord.File(buf, filename="missions.png")
+            embed = base_embed(f"📋 Misiones — {today_str()}\n{new_claimed}/5 reclamadas", COLOR, title="📋 Misiones diarias")
+            embed.set_image(url="attachment://missions.png")
+            embed.set_footer(text="Reset 00:00 UTC • SoulSeeker™")
+            done = sum(1 for m in missions if int(m["progress"]) >= int(m["goal"]))
+            if done == 5 and new_claimed < 5:
+                embed.description += "\n\n💎 ¡Completa las 5 y reclama el **BONUS épico**!"
+            await interaction.message.edit(embed=embed, attachments=[file], view=self)
+        except Exception:
+            try:
+                embed = await build_missions_embed(self.guild_id, self.user_id)
+                await interaction.message.edit(embed=embed, view=self)
+            except: pass
 
     def _btn(self, mission: dict):
         done = int(mission["progress"]) >= int(mission["goal"])
@@ -240,7 +257,7 @@ class MissionsCog(commands.Cog):
         try:
             cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
             await db.db().execute("DELETE FROM user_missions WHERE date < ?", (cutoff,))
-            await db.db().execute("DELETE FROM guild_kv WHERE key LIKE 'mission_bonus_%' AND key < ?", (f"mission_bonus_ {cutoff}",))
+            await db.db().execute("DELETE FROM guild_kv WHERE key LIKE 'mission_bonus_%' AND key < ?", (f"mission_bonus_{cutoff}",))
             await db.db().commit()
         except: pass
 
@@ -271,14 +288,30 @@ class MissionsCog(commands.Cog):
     @app_commands.describe(usuario="Ver misiones de otro usuario (opcional)")
     async def ver(self, interaction: discord.Interaction, usuario: Optional[discord.Member] = None):
         target = usuario or interaction.user
-        embed = await build_missions_embed(interaction.guild_id, target.id)
         missions = await get_missions(interaction.guild_id, target.id)
         view = build_missions_view(interaction.guild_id, target.id, missions)
         # if viewing other, disable claim
         if target.id != interaction.user.id:
             for child in view.children:
                 child.disabled = True
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=(target.id==interaction.user.id))
+        # Pillow card
+        try:
+            await interaction.response.defer(ephemeral=(target.id == interaction.user.id))
+            from utils.card_renderer import render_missions_card
+            claimed = sum(1 for m in missions if int(m["claimed"]))
+            date_label = today_str()
+            buf = await render_missions_card(target.display_name, target.display_avatar.url, missions, claimed, date_label)
+            file = discord.File(buf, filename="missions.png")
+            embed = base_embed(f"📋 Misiones de **{target.display_name}** — {today_str()}\n{claimed}/5 reclamadas", COLOR, title="📋 Misiones diarias")
+            embed.set_image(url="attachment://missions.png")
+            embed.set_footer(text="Reset 00:00 UTC • SoulSeeker™")
+            done = sum(1 for m in missions if int(m["progress"]) >= int(m["goal"]))
+            if done == 5 and claimed < 5:
+                embed.description += "\n\n💎 ¡Completa las 5 y reclama el **BONUS épico**!"
+            await interaction.followup.send(embed=embed, file=file, view=view)
+        except Exception:
+            embed = await build_missions_embed(interaction.guild_id, target.id)
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=(target.id == interaction.user.id))
 
     @missions.command(name="reroll", description="Rerolea tus misiones de hoy (Staff o 1/día)")
     async def reroll(self, interaction: discord.Interaction):
