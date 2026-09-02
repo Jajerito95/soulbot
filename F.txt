@@ -51,3 +51,24 @@ Boss v2 — Sistema de Daño por XP:
   [x] Nuevo Pillow: nombre, imagen, HP bar, top3, recompensas a la derecha
   [x] Anti-loop: boss reward XP no daña al boss (flag _boss_reward)
   [x] Fuentes Outfit-Bold/Regular en boss card
+
+Misiones Pillow Card:
+  [x] render_missions_card() — 934px, avatar, 5 misiones con barra, status icons
+  [x] /misiones ver usa Pillow (defer + imagen) con fallback embed
+  [x] Claim refresh actualiza la card con Pillow
+
+Bugs Fix (14 total):
+  [x] relampago.py: import os (usaba _os alias)
+  [x] boss.py: BytesIO wrap para discord.File (null byte error)
+  [x] welcome.py: left_count incrementaba para TODOS los users, no solo el inviter
+  [x] vc_tts.py: file descriptor leak (sin with open)
+  [x] vc_tts.py: AttributeError si voice_client es None
+  [x] tickets.py: queue tickets ping staff (faltaba ping=False)
+  [x] boardgames.py: on_timeout no llamaba self.stop() (3 views)
+  [x] suggestions.py: defer() sin ephemeral=True
+  [x] relampago.py: defer(ephemeral=True) en claim_btn (404 interaction)
+  [x] giveaways.py: defer(ephemeral=True) en botón (token expiry)
+  [x] vc_tts.py: await None TypeError en fallback voz
+  [x] missions.py: space en mission_bonus_ key (prune roto)
+  [x] code_sync.py: firma embed fallback incorrecta
+  [x] automod.py: ping_cache sin cleanup (memory leak)
