@@ -14,34 +14,98 @@ from utils.embeds import success_embed, error_embed, base_embed
 from config import COLOR
 
 # ---------- Pillow banner ----------
-def render_lightning_banner() -> io.BytesIO:
+import os as _os
+_FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "fonts")
+_FONT_BOLD_PATH = os.path.join(_FONT_DIR, "Outfit-Bold.ttf")
+_FONT_REG_PATH = os.path.join(_FONT_DIR, "Outfit-Regular.ttf")
+
+def render_lightning_banner(reward_min: int = 300, reward_max: int = 800) -> io.BytesIO:
     try:
         from PIL import Image, ImageDraw, ImageFont
-        w, h = 800, 200
-        img = Image.new("RGB", (w, h), (15, 15, 30))
+        w, h = 1000, 340
+        img = Image.new("RGBA", (w, h), (15, 15, 30, 255))
         draw = ImageDraw.Draw(img)
-        # gradient
+        # dark gradient
         for y in range(h):
-            c = int(15 + (y / h) * 40)
-            draw.line([(0, y), (w, y)], fill=(c, c, 60 + int(y / h * 40)))
-        # lightning zigzag
-        draw.line([(380, 20), (420, 80), (390, 90), (440, 160)], fill=(255, 255, 100), width=6)
-        draw.line([(380, 20), (420, 80), (390, 90), (440, 160)], fill=(255, 255, 255), width=2)
-        # text
+            t = y / h
+            r = int(15 + t * 20)
+            g = int(15 + t * 15)
+            b = int(30 + t * 55)
+            draw.line([(0, y), (w, y)], fill=(r, g, b, 255))
+        # glow background — radial amarillo suave
+        glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        gdraw = ImageDraw.Draw(glow)
+        cx, cy = 340, 170
+        for radius in range(180, 0, -4):
+            alpha = int(18 * (1 - radius / 180))
+            gdraw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=(255, 255, 100, alpha))
+        img = Image.alpha_composite(img, glow)
+        draw = ImageDraw.Draw(img)
+        # THICK lightning bolt — polygon with width
+        bolt_points = [
+            (360, 20),   # top
+            (400, 20),
+            (385, 120),  # middle right
+            (420, 115),
+            (350, 310),  # bottom point
+            (370, 310),
+            (395, 180),  # back up
+            (365, 185),
+        ]
+        draw.polygon(bolt_points, fill=(255, 255, 140, 255))
+        # inner highlight
+        bolt_inner = [
+            (370, 35),
+            (393, 35),
+            (383, 115),
+            (405, 112),
+            (365, 290),
+            (375, 290),
+            (393, 170),
+            (375, 173),
+        ]
+        draw.polygon(bolt_inner, fill=(255, 255, 220, 180))
+        # outer glow bolt
+        bolt_glow = [
+            (345, 10), (415, 10), (400, 125), (435, 120),
+            (340, 320), (380, 320), (405, 190), (355, 195),
+        ]
+        glow_overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        glow_draw = ImageDraw.Draw(glow_overlay)
+        glow_draw.polygon(bolt_glow, fill=(255, 255, 100, 35))
+        img = Image.alpha_composite(img, glow_overlay)
+        draw = ImageDraw.Draw(img)
+
+        # fonts
         try:
-            font = ImageFont.truetype("arial.ttf", 48)
-            sfont = ImageFont.truetype("arial.ttf", 20)
+            font_title = ImageFont.truetype(_FONT_BOLD_PATH, 64)
+            font_sub = ImageFont.truetype(_FONT_REG_PATH, 24)
+            font_reward = ImageFont.truetype(_FONT_BOLD_PATH, 28)
         except:
-            font = ImageFont.load_default()
-            sfont = ImageFont.load_default()
-        draw.text((w//2, 70), "⚡ RELÁMPAGO ⚡", fill=(255, 255, 100), font=font, anchor="mm")
-        draw.text((w//2, 120), "¡El que lo ve lo pilla!  •  3 ganadores  •  5 min", fill=(200, 200, 255), font=sfont, anchor="mm")
+            font_title = ImageFont.load_default()
+            font_sub = ImageFont.load_default()
+            font_reward = ImageFont.load_default()
+
+        # title
+        tx = 520
+        draw.text((tx, 80), "⚡ RELÁMPAGO ⚡", font=font_title, fill=(255, 255, 140, 255))
+        draw.text((tx, 160), "¡El que lo ve lo pilla!", font=font_sub, fill=(220, 220, 255, 255))
+        draw.text((tx, 200), "3 ganadores  •  5 minutos", font=font_sub, fill=(180, 180, 220, 255))
+        # reward box
+        draw.rounded_rectangle([tx, 250, tx + 340, 296], radius=14, fill=(255, 255, 100, 30), outline=(255, 255, 100, 120), width=2)
+        draw.text((tx + 170, 260), f"{reward_min}-{reward_max} Coins + Boost x2", font=font_reward, fill=(255, 255, 140, 255), anchor="mt")
+
+        # rounded corners
+        mask = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(mask).rounded_rectangle([0, 0, w, h], radius=28, fill=255)
+        card = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        card.paste(img, (0, 0), mask)
+
         buf = io.BytesIO()
-        img.save(buf, format="PNG")
+        card.convert("RGB").save(buf, format="PNG")
         buf.seek(0)
         return buf
     except Exception:
-        # fallback sin Pillow
         buf = io.BytesIO()
         buf.write(b"")
         buf.seek(0)
@@ -218,7 +282,7 @@ class RelampagoCog(commands.Cog):
         except: pass
         # pillow banner
         try:
-            buf = await asyncio.to_thread(render_lightning_banner)
+            buf = await asyncio.to_thread(render_lightning_banner, 300, 800)
             file = discord.File(buf, filename="relampago.png") if buf.getbuffer().nbytes > 0 else None
             if file:
                 embed.set_image(url="attachment://relampago.png")
