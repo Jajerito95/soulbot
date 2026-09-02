@@ -14,7 +14,7 @@ from utils.embeds import success_embed, error_embed, base_embed
 from config import COLOR
 
 # ---------- Pillow banner ----------
-import os as _os
+import os
 _FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "fonts")
 _FONT_BOLD_PATH = os.path.join(_FONT_DIR, "Outfit-Bold.ttf")
 _FONT_REG_PATH = os.path.join(_FONT_DIR, "Outfit-Regular.ttf")
