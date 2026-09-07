@@ -125,6 +125,8 @@ class WelcomeCog(commands.Cog):
                 guild.name,
                 guild.icon.url if guild.icon else None,
                 guild.member_count,
+                title="👋 ¡BIENVENIDO/A!",
+                subtitle=f"bienvenido a {guild.name}",
             )
             file = discord.File(buf, filename="welcome.png")
             embed.set_image(url="attachment://welcome.png")
@@ -162,13 +164,15 @@ class WelcomeCog(commands.Cog):
         template = config.get("farewell_message") or DEFAULT_FAREWELL
         embed = build_farewell_embed(member, template)
         try:
-            from utils.card_renderer import render_welcome  # reutiliza estilo bienvenida pero con texto despedida
+            from utils.card_renderer import render_welcome
             buf = await render_welcome(
                 member.display_name,
                 member.display_avatar.url,
-                f"Adiós de {member.guild.name}",
+                member.guild.name,
                 member.guild.icon.url if member.guild.icon else None,
                 member.guild.member_count,
+                title="😢 ¡ADIÓS!",
+                subtitle=f"adiós de {member.guild.name}",
             )
             file = discord.File(buf, filename="farewell.png")
             embed.set_image(url="attachment://farewell.png")

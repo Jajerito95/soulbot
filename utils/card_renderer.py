@@ -460,45 +460,79 @@ async def render_welcome(
     guild_icon_url: str | None,
     member_count: int,
     accent_hex: str | None = None,
+    title: str | None = None,
+    subtitle: str | None = None,
 ) -> io.BytesIO:
-    """Tarjeta de bienvenida (Pillow) para on_member_join."""
+    """Tarjeta de bienvenida/despedida (Pillow)."""
     accent = _hex_to_rgb(accent_hex) if accent_hex else ACCENT_DEFAULT
-    CARD_W, CARD_H = 934, 312
+    accent_light = tuple(min(255, c + 40) for c in accent)
+    is_farewell = title is not None and "adiós" in title.lower()
+    CARD_W, CARD_H = 934, 340
 
-    base = Image.new("RGBA", (CARD_W, CARD_H), BG_COLOR + (255,))
+    # background gradient
+    base = Image.new("RGBA", (CARD_W, CARD_H), (0,0,0,0))
+    bdraw = ImageDraw.Draw(base)
+    for y in range(CARD_H):
+        t = y / CARD_H
+        r = int(BG_COLOR[0]*(1-t) + (BG_COLOR[0]+14)*t)
+        g = int(BG_COLOR[1]*(1-t) + (BG_COLOR[1]+14)*t)
+        b = int(BG_COLOR[2]*(1-t) + (BG_COLOR[2]+16)*t)
+        bdraw.line([(0,y),(CARD_W,y)], fill=(r,g,b,255))
+
+    # diagonal accent
     overlay = Image.new("RGBA", (CARD_W, CARD_H), (0, 0, 0, 0))
     odraw = ImageDraw.Draw(overlay)
-    odraw.polygon(
-        [(CARD_W - 220, 0), (CARD_W, 0), (CARD_W, CARD_H), (CARD_W - 380, CARD_H)],
-        fill=accent + (255,),
-    )
+    odraw.polygon([(CARD_W - 260, 0), (CARD_W, 0), (CARD_W, CARD_H), (CARD_W - 420, CARD_H)], fill=accent + (255,))
+    odraw.line([(CARD_W - 260, 0),(CARD_W - 420, CARD_H)], fill=accent_light + (90,), width=2)
     base = Image.alpha_composite(base, overlay)
 
     mask = Image.new("L", (CARD_W, CARD_H), 0)
     ImageDraw.Draw(mask).rounded_rectangle([0, 0, CARD_W, CARD_H], radius=28, fill=255)
     card = Image.new("RGBA", (CARD_W, CARD_H), (0, 0, 0, 0))
     card.paste(base, (0, 0), mask)
-
     draw = ImageDraw.Draw(card)
 
+    # avatar with glow
+    shadow = Image.new("RGBA", (160,160), (0,0,0,0))
+    ImageDraw.Draw(shadow).ellipse((0,0,160,160), fill=(0,0,0,80))
+    card.paste(shadow, (44, 65), shadow)
     try:
         avatar_bytes = await _download(avatar_url)
-        avatar_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((150, 150))
+        avatar_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((150, 150), Image.LANCZOS)
     except Exception:
         avatar_img = Image.new("RGBA", (150, 150), (80, 80, 80, 255))
     avatar_mask = Image.new("L", (150, 150), 0)
     ImageDraw.Draw(avatar_mask).ellipse((0, 0, 150, 150), fill=255)
-    card.paste(avatar_img, (48, 66), avatar_mask)
-    draw.ellipse((48, 66, 198, 216), outline=(255, 255, 255, 255), width=4)
+    card.paste(avatar_img, (46, 67), avatar_mask)
+    draw.ellipse((46, 67, 196, 217), outline=(255, 255, 255, 255), width=4)
+    draw.ellipse((48, 69, 194, 215), outline=accent + (180,), width=2)
 
-    font_welcome = ImageFont.truetype(FONT_BOLD, 30)
-    font_name = ImageFont.truetype(FONT_BOLD, 40)
-    font_sub = ImageFont.truetype(FONT_REGULAR, 22)
+    try:
+        font_title = ImageFont.truetype(FONT_BOLD, 36)
+        font_name = ImageFont.truetype(FONT_BOLD, 38)
+        font_sub = ImageFont.truetype(FONT_REGULAR, 22)
+        font_small = ImageFont.truetype(FONT_REGULAR, 18)
+    except Exception:
+        font_title = font_name = font_sub = font_small = ImageFont.load_default()
 
-    draw.text((222, 70), "¡BIENVENIDO/A!", font=font_welcome, fill=accent + (255,))
-    draw.text((222, 116), f"@{_clean(username)}", font=font_name, fill=(255, 255, 255, 255))
-    draw.text((222, 168), f"a {_clean(guild_name)}", font=font_sub, fill=(200, 203, 208, 255))
-    draw.text((222, 206), f"Miembros totales: {member_count}", font=font_sub, fill=(170, 173, 178, 255))
+    tx = 220
+    # title
+    display_title = title or ("👋 ¡BIENVENIDO/A!" if not is_farewell else "😢 ¡ADIÓS!")
+    draw.text((tx, 60), display_title, font=font_title, fill=accent + (255,))
+    # username
+    clean_name = _clean(username)[:24]
+    draw.text((tx, 110), f"@{clean_name}", font=font_name, fill=(255, 255, 255, 255))
+    # subtitle / guild
+    display_sub = subtitle or f"bienvenido a {_clean(guild_name)}"
+    draw.text((tx, 162), display_sub, font=font_sub, fill=(200, 203, 208, 255))
+    # member count
+    draw.text((tx, 200), f"Miembros totales: {member_count}", font=font_sub, fill=(170, 173, 178, 255))
+
+    # decorative line
+    draw.line([(tx, 240), (tx + 300, 240)], fill=accent + (80,), width=2)
+
+    # soulseeker brand
+    draw.text((tx, 255), "SoulSeeker™", font=font_small, fill=(110, 114, 120, 255))
 
     buffer = io.BytesIO()
     card.convert("RGB").save(buffer, format="PNG")

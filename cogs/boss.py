@@ -273,8 +273,36 @@ class BossCog(commands.Cog):
         boss = dict(zip(cols, row))
         await db.db().execute("UPDATE boss_current SET status='ended', ended_at=CURRENT_TIMESTAMP WHERE id=?", (boss["id"],))
         await db.db().commit()
+        # get top and total damage before rewards
+        cur2 = await db.db().execute("SELECT user_id, damage FROM boss_damage WHERE event_id=? ORDER BY damage DESC LIMIT 3", (boss["id"],))
+        top_rows = await cur2.fetchall()
+        top_names = []
+        for uid, dmg in top_rows:
+            m = interaction.guild.get_member(uid)
+            name = m.display_name if m else f"User {uid}"
+            top_names.append((name, dmg))
+        cur3 = await db.db().execute("SELECT SUM(damage) FROM boss_damage WHERE event_id=?", (boss["id"],))
+        total_row = await cur3.fetchone()
+        total_all = (total_row[0] or 0) if total_row else 0
+        # reward
         await self._reward_boss(interaction.guild, boss["id"])
-        await interaction.response.send_message(embed=success_embed(f"Boss **{boss['boss_name']}** finalizado.", title="👹 Boss terminado"))
+        # send final card
+        pillow = await render_boss_pillow(
+            boss["boss_name"], 0, int(boss["max_hp"]),
+            top_names, boss["image_url"], total_all
+        )
+        if pillow:
+            file = discord.File(io.BytesIO(pillow), filename="boss.png")
+            embed = base_embed(
+                f"👹 **{boss['boss_name']}** — **DERROTADO**\n"
+                f"Daño total: **{total_all:,}**\n"
+                f"Recompensas entregadas a todos los participantes.",
+                COLOR, title="👹 ¡BOSS CAÍDO!"
+            )
+            embed.set_image(url="attachment://boss.png")
+            await interaction.response.send_message(embed=embed, file=file)
+        else:
+            await interaction.response.send_message(embed=success_embed(f"Boss **{boss['boss_name']}** finalizado. Recompensas entregadas.", title="👹 Boss terminado"))
 
     @boss.command(name="config", description="Configura canal auto del boss (Staff)")
     @app_commands.describe(canal="Canal donde aparecerá auto")
