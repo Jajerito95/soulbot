@@ -1,6 +1,5 @@
 from __future__ import annotations
 import re
-import datetime
 import discord
 
 import database as db
@@ -62,11 +61,11 @@ async def apply_sanction(
             except discord.Forbidden:
                 pass
     elif punishment == "perm":
-        # "perm" ahora es timeout 1 día + invite temporal (no más bans)
-        action = "timeout"
-        timeout_until = datetime.datetime.utcnow() + datetime.timedelta(days=1)
-        await member.timeout(timeout_until, reason=full_reason)
-        # crear invite temporal de 1 día
+        # "perm" ahora es ban 1 día + invite temporal
+        action = "ban"
+        await guild.ban(member, reason=full_reason)
+        await db.add_temp_ban(guild.id, member.id, 1)
+        # crear invite temporal
         invite_url = None
         try:
             invite = await guild.create_invite(max_age=86400, max_uses=1, reason=f"Invite post-sanción para {member.id}")
@@ -75,9 +74,9 @@ async def apply_sanction(
             pass
     else:
         days = int(punishment[:-1])
-        action = "timeout"
-        timeout_until = datetime.datetime.utcnow() + datetime.timedelta(days=days)
-        await member.timeout(timeout_until, reason=full_reason)
+        action = "ban"
+        await guild.ban(member, reason=full_reason)
+        await db.add_temp_ban(guild.id, member.id, days)
         # invite temporal para que pueda volver cuando expire
         invite_url = None
         try:
@@ -92,7 +91,7 @@ async def apply_sanction(
     try:
         from cogs.appeals import AppealPromptView
         sanction_text = f"Has recibido una sanción en **{guild.name}**.\n⚙️ Infracción: {label}\n📝 Razón: {reason}\n⚖️ Sanción: {punishment_label(punishment)}\n🆔 ID: `#{sanction_id}`"
-        if invite_url and action == "timeout":
+        if invite_url:
             sanction_text += f"\n\n📩 Cuando expire tu sanción, puedes volver con este invite:\n{invite_url}"
         await member.send(
             embed=base_embed(
@@ -100,7 +99,7 @@ async def apply_sanction(
                 COLOR_ERROR,
                 title="🛡️ Sanción aplicada",
             ),
-            view=AppealPromptView(guild.id, sanction_id) if action == "timeout" else None,
+            view=AppealPromptView(guild.id, sanction_id),
         )
     except discord.Forbidden:
         pass
@@ -125,5 +124,5 @@ def punishment_label(punishment: str) -> str:
     if punishment == "warn_change":
         return "⚠️ Warn + cambio obligatorio"
     if punishment == "perm":
-        return "🔇 Timeout (1 día) + Invite temporal"
-    return f"🔇 Timeout ({punishment})"
+        return "🔨 Ban temporal (1 día) + Invite"
+    return f"🔨 Ban temporal ({punishment}) + Invite"

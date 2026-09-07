@@ -124,15 +124,12 @@ class AppealReviewView(discord.ui.View):
         await db.resolve_appeal(appeal_id, status, interaction.user.id)
         sanction = await db.get_sanction_by_id(interaction.guild_id, appeal["sanction_id"])
 
-        if status == "approved" and sanction:
-            # Si era timeout, quitar el timeout
-            if sanction["action"] == "timeout":
-                try:
-                    member = interaction.guild.get_member(appeal["user_id"])
-                    if member:
-                        await member.timeout(None, reason=f"Apelación #{appeal_id} aprobada")
-                except (discord.NotFound, discord.Forbidden):
-                    pass
+        if status == "approved" and sanction and sanction["action"] == "ban":
+            try:
+                await interaction.guild.unban(discord.Object(id=appeal["user_id"]), reason=f"Apelación #{appeal_id} aprobada")
+            except (discord.NotFound, discord.Forbidden):
+                pass
+            await db.remove_temp_ban(interaction.guild_id, appeal["user_id"])
 
         try:
             user = await interaction.client.fetch_user(appeal["user_id"])
