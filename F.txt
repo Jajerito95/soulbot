@@ -72,3 +72,20 @@ Bugs Fix (14 total):
   [x] missions.py: space en mission_bonus_ key (prune roto)
   [x] code_sync.py: firma embed fallback incorrecta
   [x] automod.py: ping_cache sin cleanup (memory leak)
+
+Welcome/Farewell Fixes:
+  [x] render_welcome: parámetro title/subtitle (antes hardcodeaba "BIENVENIDO/A!")
+  [x] Farewell card ahora dice "😢 ¡ADIÓS!" en vez de "BIENVENIDO/A!"
+  [x] Card rediseñada: 934x340, diagonal accent, avatar glow, brand line
+  [x] Welcome pasa title="👋 ¡BIENVENIDO/A!" explícito
+  [x] Farewell pasa title="😢 ¡ADIÓS!" explícito
+
+Boss End Fix:
+  [x] /boss end ahora muestra card final con Pillow (HP=0, top3, daño total)
+  [x] Antes no mostraba nada, ahora dice "👹 ¡BOSS CAÍDO!" con imagen
+
+Nuevo Comando — /whisper:
+  [x] Mensaje anónimo por DM a cualquier usuario
+  [x] Log automático en canal staff (1517597530022477965)
+  [x] Si DM falla (desactivados), avisa al staff
+  [x] Máximo 500 caracteres, no se puede enviar a bots ni a uno mismo
