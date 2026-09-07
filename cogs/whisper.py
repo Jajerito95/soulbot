@@ -40,15 +40,14 @@ class WhisperCog(commands.Cog):
         except discord.Forbidden:
             dm_ok = False
 
-        # log al canal staff
+        # log al canal staff — SOLO el contenido, NO quién envió
         log_channel = self.bot.get_channel(WHISPER_LOG_CHANNEL_ID)
         if log_channel:
             log_embed = base_embed(
-                f"**De:** {interaction.user.mention} (`{interaction.user.id}`)\n"
-                f"**Para:** {usuario.mention} (`{usuario.id}`)\n"
+                f"**Para:** {usuario.mention}\n"
                 f"**Mensaje:**\n>>> {mensaje}\n\n"
                 f"**DM enviado:** {'✅' if dm_ok else '❌ (desactivados)'}",
-                COLOR, title="🤫 Whisper log (Staff)"
+                COLOR, title="🤫 Whisper (moderación)"
             )
             try:
                 await log_channel.send(embed=log_embed)
