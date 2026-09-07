@@ -13,12 +13,12 @@ from utils.embeds import warning_embed
 
 INVITE_RE = re.compile(r"(discord\.gg/|discord(app)?\.com/invite/)", re.IGNORECASE)
 
-SPAM_WINDOW = 15
-SPAM_REPEATS = 4
-FLOOD_WINDOW = 8
-FLOOD_COUNT = 6
-CAPS_MIN_LEN = 10
-CAPS_RATIO = 0.7
+SPAM_WINDOW = 20
+SPAM_REPEATS = 6
+FLOOD_WINDOW = 10
+FLOOD_COUNT = 8
+CAPS_MIN_LEN = 15
+CAPS_RATIO = 0.8
 GHOST_PING_WINDOW = 5
 
 # categoría interna -> (columna de config, clave de infracción del catálogo, nombre legible)

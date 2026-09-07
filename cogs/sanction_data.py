@@ -19,10 +19,10 @@ def _add(key: str, label: str, ladder: list[str]):
 
 
 # key                          label                                              escalera
-_add("spam", "Spam", ["1d", "3d", "7d", "14d"])
-_add("flood", "Flood", ["1d", "3d", "7d", "14d"])
-_add("mayusculas", "Mayúsculas excesivas", ["warn", "1d", "3d"])
-_add("chat_disruption", "Mensajes sin sentido (Chat Disruption)", ["warn", "1d", "3d"])
+_add("spam", "Spam", ["warn", "warn", "1d", "3d", "7d"])
+_add("flood", "Flood", ["warn", "warn", "1d", "3d", "7d"])
+_add("mayusculas", "Mayúsculas excesivas", ["warn", "warn", "warn", "1d"])
+_add("chat_disruption", "Mensajes sin sentido (Chat Disruption)", ["warn", "warn", "1d", "3d"])
 _add("ghost_ping", "Ghost Ping", ["warn", "1d", "3d", "7d"])
 _add("publicidad", "Publicidad (servidores/redes)", ["7d", "30d", "perm"])
 _add("autopromocion", "Auto-promoción reiterada", ["3d", "7d", "14d"])
