@@ -1,5 +1,6 @@
 from __future__ import annotations
 import re
+import datetime
 import discord
 
 import database as db
@@ -65,9 +66,9 @@ async def apply_sanction(
         await guild.ban(member, reason=full_reason)
     else:
         days = int(punishment[:-1])
-        action = "ban"
-        await guild.ban(member, reason=full_reason)
-        await db.add_temp_ban(guild.id, member.id, days)
+        action = "timeout"
+        timeout_until = datetime.datetime.utcnow() + datetime.timedelta(days=days)
+        await member.timeout(timeout_until, reason=full_reason)
 
     sanction_id = await db.log_staff_action(guild.id, member.id, staff_id, action, full_reason, evidence_url, infraction_key)
 
@@ -106,4 +107,4 @@ def punishment_label(punishment: str) -> str:
         return "⚠️ Warn + cambio obligatorio"
     if punishment == "perm":
         return "🔨 Ban permanente"
-    return f"🔨 Ban temporal ({punishment})"
+    return f"🔇 Timeout ({punishment})"
