@@ -6,7 +6,7 @@ from discord.ext import commands
 from utils.embeds import success_embed, error_embed, base_embed
 from config import COLOR
 
-WHISPER_LOG_CHANNEL_ID = 1517597530022477965  # canal staff para logs de whisper
+WHISPER_LOG_CHANNEL_ID = 1517597549760872489  # canal staff privado para logs de whisper
 
 
 class WhisperCog(commands.Cog):
