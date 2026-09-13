@@ -413,6 +413,23 @@ async def init_db():
         except Exception:
             pass
 
+    # --- One-time migration: reduce all balances by 30% ---
+    try:
+        flag_cols = {row[1] for row in await (await _db.execute("PRAGMA table_info(_migrations)")).fetchall()}
+    except Exception:
+        flag_cols = set()
+    if not flag_cols:
+        await _db.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)")
+        await _db.commit()
+    try:
+        row = await (await _db.execute("SELECT 1 FROM _migrations WHERE name='economy_tax_30'")).fetchone()
+    except Exception:
+        row = None
+    if row is None:
+        await _db.execute("UPDATE economy SET balance = CAST(balance * 0.7 AS INTEGER)")
+        await _db.execute("INSERT INTO _migrations (name) VALUES ('economy_tax_30')")
+        await _db.commit()
+
     await _db.commit()
 
 

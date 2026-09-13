@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json
 import os
 import datetime
@@ -38,8 +39,10 @@ class BackupsCog(commands.Cog):
 
         filename = f"backup_{interaction.guild_id}_{int(datetime.datetime.utcnow().timestamp())}.json"
         path = os.path.join(BACKUPS_DIR, filename)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        def _write_backup():
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        await asyncio.to_thread(_write_backup)
 
         embed = success_embed(
             "Incluye: configuración general, canales asignados, recompensas de nivel y artículos de la tienda.\n"
@@ -85,10 +88,12 @@ class BackupsCog(commands.Cog):
 
     @backup_group.command(name="list", description="Lista los backups guardados en este host")
     async def list_backups(self, interaction: discord.Interaction):
-        files = sorted(
-            [f for f in os.listdir(BACKUPS_DIR) if f.startswith(f"backup_{interaction.guild_id}_")],
-            reverse=True,
-        )
+        def _list_backups():
+            return sorted(
+                [f for f in os.listdir(BACKUPS_DIR) if f.startswith(f"backup_{interaction.guild_id}_")],
+                reverse=True,
+            )
+        files = await asyncio.to_thread(_list_backups)
         if not files:
             await interaction.response.send_message(embed=error_embed("No hay backups guardados en este host todavía."), ephemeral=True)
             return

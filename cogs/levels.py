@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import random
 import time
 import datetime
@@ -88,7 +89,7 @@ class LeaderboardView(discord.ui.View):
             await interaction.followup.send(embed=error_embed("Sin miembros válidos para mostrar."), ephemeral=True)
             return
         guild_icon = guild.icon.url if guild.icon else None
-        buffer = await render_leaderboard(guild.name, guild_icon, entries, period_label)
+        buffer = await asyncio.to_thread(render_leaderboard, guild.name, guild_icon, entries, period_label)
         file = discord.File(buffer, filename="leaderboard.png")
         self._set_active(periodo)
         try:
@@ -238,7 +239,8 @@ class LevelsCog(commands.Cog):
 
         await interaction.response.defer()
         from utils.card_renderer import render_card
-        buffer = await render_card(
+        buffer = await asyncio.to_thread(
+            render_card,
             username=target.name, avatar_url=target.display_avatar.url,
             level=level, xp_current=xp_in_level, xp_needed=xp_needed, rank=position, accent_hex=saved_color, total_xp=data["xp"],
         )
@@ -269,7 +271,8 @@ class LevelsCog(commands.Cog):
 
         await interaction.response.defer()
         from utils.card_renderer import render_card
-        buffer = await render_card(
+        buffer = await asyncio.to_thread(
+            render_card,
             username=target.name,
             avatar_url=target.display_avatar.url,
             level=level,
@@ -347,7 +350,7 @@ class LevelsCog(commands.Cog):
 
         from utils.card_renderer import render_leaderboard
         guild_icon = interaction.guild.icon.url if interaction.guild.icon else None
-        buffer = await render_leaderboard(interaction.guild.name, guild_icon, entries, period_label)
+        buffer = await asyncio.to_thread(render_leaderboard, interaction.guild.name, guild_icon, entries, period_label)
         view = LeaderboardView(initial_periodo=periodo)
         await interaction.followup.send(file=discord.File(buffer, filename="leaderboard.png"), view=view)
 

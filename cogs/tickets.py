@@ -56,7 +56,7 @@ def build_panel_embed() -> discord.Embed:
 async def build_panel_banner(guild: discord.Guild) -> discord.File:
     from utils.card_renderer import render_banner
     guild_icon = guild.icon.url if guild.icon else None
-    buffer = await render_banner("🌳 ¿Necesitas Ayuda?", "SoulBot • Support", guild_icon)
+    buffer = await asyncio.to_thread(render_banner, "🌳 ¿Necesitas Ayuda?", "SoulBot • Support", guild_icon)
     return discord.File(buffer, filename="ticket_banner.png")
 
 
@@ -194,7 +194,7 @@ async def _create_ticket_channel(guild: discord.Guild, member: discord.Member, c
     from utils.card_renderer import render_banner, category_accent
 
     accent = category_accent(category)
-    banner_buf = await render_banner(category, f"Ticket de {member.display_name}", None, accent_hex=accent)
+    banner_buf = await asyncio.to_thread(render_banner, category, f"Ticket de {member.display_name}", None, accent_hex=accent)
     banner_file = discord.File(banner_buf, filename="ticket_open.png")
 
     embed = base_embed(

@@ -2,17 +2,36 @@ from __future__ import annotations
 import io
 import os
 import re
-import asyncio
+import urllib.request
 
-import aiohttp
 from PIL import Image, ImageDraw, ImageFont
 import time as _time
 
 FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "fonts")
 _avatar_cache: dict[str, tuple[bytes, float]] = {}
 _AVATAR_TTL = 300
+
+
+def _download_sync(url: str) -> bytes:
+    now = _time.time()
+    if url in _avatar_cache:
+        data, ts = _avatar_cache[url]
+        if now - ts < _AVATAR_TTL:
+            return data
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "SoulBot/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = resp.read()
+            _avatar_cache[url] = (data, now)
+            if len(_avatar_cache) > 200:
+                oldest = min(_avatar_cache, key=lambda k: _avatar_cache[k][1])
+                _avatar_cache.pop(oldest, None)
+            return data
+    except Exception:
+        return b""
 FONT_BOLD = os.path.join(FONT_DIR, "Outfit-Bold.ttf")
 FONT_REGULAR = os.path.join(FONT_DIR, "Outfit-Regular.ttf")
+FONT_REG = FONT_REGULAR  # alias
 
 _EMOJI_RE = re.compile(
     "["
@@ -41,25 +60,17 @@ def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
 
-async def _download(url: str) -> bytes:
-    # cache simple en memoria para no re-descargar el mismo avatar cada /lb
-    now = _time.time()
-    if url in _avatar_cache:
-        data, ts = _avatar_cache[url]
-        if now - ts < _AVATAR_TTL:
-            return data
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=20, limit_per_host=10)) as session:
-        async with session.get(url) as resp:
-            data = await resp.read()
-            _avatar_cache[url] = (data, now)
-            # limpia cache si crece mucho
-            if len(_avatar_cache) > 200:
-                oldest = min(_avatar_cache, key=lambda k: _avatar_cache[k][1])
-                _avatar_cache.pop(oldest, None)
-            return data
+def _safe_avatar_sync(url: str) -> Image.Image:
+    try:
+        data = _download_sync(url)
+        if data:
+            return Image.open(io.BytesIO(data)).convert("RGBA")
+    except Exception:
+        pass
+    return Image.new("RGBA", (128, 128), (80, 80, 80, 255))
 
 
-async def render_card(
+def render_card(
     username: str,
     avatar_url: str,
     level: int,
@@ -108,7 +119,7 @@ async def render_card(
     card.paste(shadow, (52, 70), shadow)
     # avatar circular con borde blanco
     try:
-        avatar_bytes = await _download(avatar_url)
+        avatar_bytes = _download_sync(avatar_url)
         avatar_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((150, 150), Image.LANCZOS)
     except Exception:
         avatar_img = Image.new("RGBA", (150, 150), (80, 80, 80, 255))
@@ -192,15 +203,7 @@ async def render_card(
     return buffer
 
 
-async def _safe_avatar(url: str) -> Image.Image:
-    try:
-        data = await _download(url)
-        return Image.open(io.BytesIO(data)).convert("RGBA")
-    except Exception:
-        return Image.new("RGBA", (128, 128), (80, 80, 80, 255))
-
-
-async def render_leaderboard(
+def render_leaderboard(
     guild_name: str,
     guild_icon_url: str | None,
     entries: list[dict],
@@ -243,7 +246,7 @@ async def render_leaderboard(
     # icono guild con sombra
     if guild_icon_url:
         try:
-            icon_bytes = await _download(guild_icon_url)
+            icon_bytes = _download_sync(guild_icon_url)
             icon_img = Image.open(io.BytesIO(icon_bytes)).convert("RGBA").resize((56, 56), Image.LANCZOS)
             sh = Image.new("RGBA", (56,56), (0,0,0,0))
             ImageDraw.Draw(sh).ellipse((0,0,56,56), fill=(0,0,0,60))
@@ -273,7 +276,7 @@ async def render_leaderboard(
         2: ((205,127,80), (230,165,120)),    # bronze
     }
 
-    avatars = await asyncio.gather(*[_safe_avatar(e["avatar_url"]) for e in entries])
+    avatars = [_safe_avatar_sync(e["avatar_url"]) for e in entries]
 
     y = header_h
     for i, entry in enumerate(entries):
@@ -336,7 +339,7 @@ async def render_leaderboard(
     return buffer
 
 
-async def render_banner(title: str, subtitle: str, guild_icon_url: str | None = None, accent_hex: str | None = None) -> io.BytesIO:
+def render_banner(title: str, subtitle: str, guild_icon_url: str | None = None, accent_hex: str | None = None) -> io.BytesIO:
     """Banner decorativo genérico (usado por el panel de tickets y similares)."""
     accent = _hex_to_rgb(accent_hex) if accent_hex else ACCENT_DEFAULT
     width, height = 934, 200
@@ -360,7 +363,7 @@ async def render_banner(title: str, subtitle: str, guild_icon_url: str | None = 
     text_x = 48
     if guild_icon_url:
         try:
-            icon_bytes = await _download(guild_icon_url)
+            icon_bytes = _download_sync(guild_icon_url)
             icon_img = Image.open(io.BytesIO(icon_bytes)).convert("RGBA").resize((72, 72))
             icon_mask = Image.new("L", (72, 72), 0)
             ImageDraw.Draw(icon_mask).ellipse((0, 0, 72, 72), fill=255)
@@ -380,7 +383,7 @@ async def render_banner(title: str, subtitle: str, guild_icon_url: str | None = 
     return buffer
 
 
-async def render_sanction(
+def render_sanction(
     username: str,
     avatar_url: str,
     action: str,
@@ -410,7 +413,7 @@ async def render_sanction(
     draw = ImageDraw.Draw(card)
 
     try:
-        avatar_bytes = await _download(avatar_url)
+        avatar_bytes = _download_sync(avatar_url)
         avatar_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((150, 150))
     except Exception:
         avatar_img = Image.new("RGBA", (150, 150), (80, 80, 80, 255))
@@ -453,7 +456,7 @@ async def render_sanction(
     return buffer
 
 
-async def render_welcome(
+def render_welcome(
     username: str,
     avatar_url: str,
     guild_name: str,
@@ -497,7 +500,7 @@ async def render_welcome(
     ImageDraw.Draw(shadow).ellipse((0,0,160,160), fill=(0,0,0,80))
     card.paste(shadow, (44, 65), shadow)
     try:
-        avatar_bytes = await _download(avatar_url)
+        avatar_bytes = _download_sync(avatar_url)
         avatar_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((150, 150), Image.LANCZOS)
     except Exception:
         avatar_img = Image.new("RGBA", (150, 150), (80, 80, 80, 255))
@@ -540,7 +543,7 @@ async def render_welcome(
     return buffer
 
 
-async def render_profile(
+def render_profile(
     username: str,
     avatar_url: str,
     coins: int,
@@ -583,7 +586,7 @@ async def render_profile(
     card.paste(shadow, (52, 70), shadow)
     # avatar circular
     try:
-        avatar_bytes = await _download(avatar_url)
+        avatar_bytes = _download_sync(avatar_url)
         avatar_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((150, 150), Image.LANCZOS)
     except Exception:
         avatar_img = Image.new("RGBA", (150, 150), (80, 80, 80, 255))
@@ -627,7 +630,7 @@ async def render_profile(
     return buffer
 
 
-async def render_suggestion(
+def render_suggestion(
     username: str,
     avatar_url: str,
     content: str,
@@ -654,7 +657,7 @@ async def render_suggestion(
     draw = ImageDraw.Draw(card)
     # avatar
     try:
-        data = await _download(avatar_url)
+        data = _download_sync(avatar_url)
         av = Image.open(io.BytesIO(data)).convert("RGBA").resize((64,64), Image.LANCZOS)
     except: av = Image.new("RGBA", (64,64), (80,80,80,255))
     am = Image.new("L", (64,64), 0); ImageDraw.Draw(am).ellipse((0,0,64,64), fill=255)
@@ -687,7 +690,7 @@ async def render_suggestion(
     buf=io.BytesIO(); card.convert("RGB").save(buf, format="PNG"); buf.seek(0); return buf
 
 
-async def render_daily_streak(username: str, avatar_url: str, amount: int, streak: int, streak_coins: int, streak_xp: int, balance: int) -> io.BytesIO:
+def render_daily_streak(username: str, avatar_url: str, amount: int, streak: int, streak_coins: int, streak_xp: int, balance: int) -> io.BytesIO:
     W, H = 934, 320
     BG = (18, 20, 28)
     accent = (88, 101, 242)
@@ -742,7 +745,7 @@ async def render_daily_streak(username: str, avatar_url: str, amount: int, strea
     ImageDraw.Draw(shadow).ellipse((0,0,90,90), fill=(0,0,0,60))
     card.paste(shadow, (30, 28), shadow)
     try:
-        data = await _download(avatar_url)
+        data = _download_sync(avatar_url)
         av = Image.open(io.BytesIO(data)).convert("RGBA").resize((80,80), Image.LANCZOS)
     except: av = Image.new("RGBA", (80,80), (80,80,80,255))
     am = Image.new("L", (80,80), 0); ImageDraw.Draw(am).ellipse((0,0,80,80), fill=255)
@@ -772,7 +775,7 @@ async def render_daily_streak(username: str, avatar_url: str, amount: int, strea
     draw.text((W//2, H-14), "SoulSeeker™ • Daily", font=font_small, fill=(110,114,120,255), anchor="mm")
     buf = io.BytesIO(); card.convert("RGB").save(buf, format="PNG"); buf.seek(0); return buf
 
-async def render_streaks_overview(username: str, avatar_url: str, streaks: list[dict]) -> io.BytesIO:
+def render_streaks_overview(username: str, avatar_url: str, streaks: list[dict]) -> io.BytesIO:
     # streaks: list of {type, current, max, label}
     W, H = 700, 260 + len(streaks)*54
     BG = (22, 24, 30)
@@ -785,7 +788,7 @@ async def render_streaks_overview(username: str, avatar_url: str, streaks: list[
     card = Image.new("RGBA", (W,H), (0,0,0,0)); card.paste(base,(0,0),mask)
     draw = ImageDraw.Draw(card)
     try:
-        data = await _download(avatar_url)
+        data = _download_sync(avatar_url)
         av = Image.open(io.BytesIO(data)).convert("RGBA").resize((64,64), Image.LANCZOS)
     except: av = Image.new("RGBA", (64,64), (80,80,80,255))
     am = Image.new("L", (64,64), 0); ImageDraw.Draw(am).ellipse((0,0,64,64), fill=255)
@@ -805,7 +808,7 @@ async def render_streaks_overview(username: str, avatar_url: str, streaks: list[
     draw.text((W//2, H-14), "SoulSeeker™ • Rachas", font=font_r, fill=(110,114,120,255), anchor="mm")
     buf=io.BytesIO(); card.convert("RGB").save(buf, format="PNG"); buf.seek(0); return buf
 
-async def render_boss_card(boss_name: str, current_hp: int, max_hp: int, top: list[tuple[str,int]], image_url: str | None = None) -> io.BytesIO:
+def render_boss_card(boss_name: str, current_hp: int, max_hp: int, top: list[tuple[str,int]], image_url: str | None = None) -> io.BytesIO:
     W, H = 934, 360
     BG = (20, 16, 16)
     accent = (231, 76, 60)
@@ -823,7 +826,7 @@ async def render_boss_card(boss_name: str, current_hp: int, max_hp: int, top: li
     # boss image left — bigger
     if image_url:
         try:
-            data = await _download(image_url)
+            data = _download_sync(image_url)
             bimg = Image.open(io.BytesIO(data)).convert("RGBA").resize((280,280), Image.LANCZOS)
             m = Image.new("L", (280,280), 0); ImageDraw.Draw(m).rounded_rectangle([0,0,280,280], radius=28, fill=255)
             base.paste(bimg, (28,48), m)
@@ -885,7 +888,7 @@ def category_accent(label: str) -> str:
     return CATEGORY_PALETTE[index]
 
 
-async def render_missions_card(
+def render_missions_card(
     username: str,
     avatar_url: str,
     missions: list[dict],
@@ -934,7 +937,7 @@ async def render_missions_card(
     ImageDraw.Draw(shadow).ellipse((0, 0, 80, 80), fill=(0, 0, 0, 60))
     card.paste(shadow, (28, 22), shadow)
     try:
-        data = await _download(avatar_url)
+        data = _download_sync(avatar_url)
         av = Image.open(io.BytesIO(data)).convert("RGBA").resize((70, 70), Image.LANCZOS)
     except Exception:
         av = Image.new("RGBA", (70, 70), (80, 80, 80, 255))

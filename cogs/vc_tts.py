@@ -282,8 +282,10 @@ class VCTtsCog(commands.Cog):
                             if r.status == 200:
                                 data = await r.read()
                                 audio_path = f"/tmp/tts_{guild.id}.mp3"
-                                with open(audio_path, "wb") as f:
-                                    f.write(data)
+                                def _write_audio():
+                                    with open(audio_path, "wb") as f:
+                                        f.write(data)
+                                await asyncio.to_thread(_write_audio)
                             else:
                                 try: print(f"[vc_tts] ElevenLabs file {r.status}: {(await r.text())[:150]}")
                                 except: pass
@@ -308,8 +310,10 @@ class VCTtsCog(commands.Cog):
                     source = discord.FFmpegPCMAudio(audio_path, options="-loglevel quiet -ar 48000 -ac 2")
                 if isinstance(source, discord.FFmpegPCMAudio):
                     source = discord.PCMVolumeTransformer(source, volume=0.9)
-                with open(audio_path, 'rb') as _f:
-                    _fsize = len(_f.read())
+                def _get_size():
+                    with open(audio_path, 'rb') as _f:
+                        return len(_f.read())
+                _fsize = await asyncio.to_thread(_get_size)
                 print(f"[vc_tts] file playing {audio_path} ({_fsize} bytes)")
                 vc.play(source)
                 while vc.is_playing():
@@ -323,7 +327,7 @@ class VCTtsCog(commands.Cog):
         finally:
             try:
                 if audio_path and os.path.exists(audio_path):
-                    os.remove(audio_path)
+                    await asyncio.to_thread(os.remove, audio_path)
             except: pass
 
     # ---------- comandos mixtos (auto + staff) ----------

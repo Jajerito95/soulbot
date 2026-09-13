@@ -143,7 +143,7 @@ class EconomyCog(commands.Cog):
         embed.set_thumbnail(url=target.display_avatar.url)
         try:
             from utils.card_renderer import render_profile
-            buf = await render_profile(target.display_name, target.display_avatar.url, coins)
+            buf = await asyncio.to_thread(render_profile, target.display_name, target.display_avatar.url, coins)
             file = discord.File(buf, filename="profile.png")
             embed.set_image(url="attachment://profile.png")
             await interaction.response.send_message(embed=embed, file=file)
@@ -210,7 +210,7 @@ class EconomyCog(commands.Cog):
                 s_xp_v = s_xp  # type: ignore
             except:
                 s_day, s_coins_v, s_xp_v = 1, 50, 50
-            buf = await render_daily_streak(interaction.user.display_name, interaction.user.display_avatar.url, amount, s_day, s_coins_v, s_xp_v, new_balance)
+            buf = await asyncio.to_thread(render_daily_streak, interaction.user.display_name, interaction.user.display_avatar.url, amount, s_day, s_coins_v, s_xp_v, new_balance)
             file = discord.File(buf, filename="daily.png")
             embed = success_embed(f"💰 **{amount}** SoulCoins{streak_msg}\n👛 Saldo: **{new_balance}**", title="🎁 Daily reclamado")
             embed.set_image(url="attachment://daily.png")

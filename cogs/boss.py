@@ -5,6 +5,7 @@ import os
 import io
 from typing import Optional
 
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -60,7 +61,7 @@ async def register_boss_damage(event_id: int, guild_id: int, user_id: int, damag
             pass
 
 
-async def render_boss_pillow(boss_name: str, current_hp: int, max_hp: int,
+def render_boss_pillow(boss_name: str, current_hp: int, max_hp: int,
                               top: list[tuple[str, int]], image_url: str | None,
                               total_damage_dealt: int) -> bytes | None:
     """Renderiza la tarjeta del boss con layout nuevo: nombre, imagen, HP, top3, recompensas."""
@@ -89,7 +90,10 @@ async def render_boss_pillow(boss_name: str, current_hp: int, max_hp: int,
         img_x, img_y = 28, 60
         if image_url:
             try:
-                data = await _download_boss(image_url)
+                import urllib.request
+                req = urllib.request.Request(image_url, headers={"User-Agent": "SoulBot/1.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = resp.read()
                 bimg = Image.open(io.BytesIO(data)).convert("RGBA").resize((280, 280), Image.LANCZOS)
                 m = Image.new("L", (280, 280), 0)
                 ImageDraw.Draw(m).rounded_rectangle([0, 0, 280, 280], radius=28, fill=255)
@@ -187,13 +191,6 @@ async def render_boss_pillow(boss_name: str, current_hp: int, max_hp: int,
         return None
 
 
-async def _download_boss(url: str) -> bytes:
-    import aiohttp
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            return await resp.read()
-
-
 class BossCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -232,7 +229,7 @@ class BossCog(commands.Cog):
 
         # generar Pillow y enviar
         ch = target_ch if isinstance(target_ch, discord.TextChannel) else interaction.channel
-        pillow = await render_boss_pillow(nombre, hp, hp, [], imagen, 0)
+        pillow = await asyncio.to_thread(render_boss_pillow, nombre, hp, hp, [], imagen, 0)
         file = discord.File(io.BytesIO(pillow), filename="boss.png") if pillow else None
 
         embed = base_embed(
@@ -287,7 +284,8 @@ class BossCog(commands.Cog):
         # reward
         await self._reward_boss(interaction.guild, boss["id"])
         # send final card
-        pillow = await render_boss_pillow(
+        pillow = await asyncio.to_thread(
+            render_boss_pillow,
             boss["boss_name"], 0, int(boss["max_hp"]),
             top_names, boss["image_url"], total_all
         )
@@ -352,7 +350,8 @@ class BossCog(commands.Cog):
         total_row = await cur3.fetchone()
         total_all = (total_row[0] or 0) if total_row else 0
 
-        pillow = await render_boss_pillow(
+        pillow = await asyncio.to_thread(
+            render_boss_pillow,
             boss["boss_name"], int(boss["current_hp"]), int(boss["max_hp"]),
             top_names, boss["image_url"], total_all
         )
@@ -440,7 +439,8 @@ class BossCog(commands.Cog):
         total_row = await cur2.fetchone()
         total_all = (total_row[0] or 0) if total_row else 0
 
-        pillow = await render_boss_pillow(
+        pillow = await asyncio.to_thread(
+            render_boss_pillow,
             boss["boss_name"], int(boss["current_hp"]), int(boss["max_hp"]),
             top_names, boss["image_url"], total_all
         )

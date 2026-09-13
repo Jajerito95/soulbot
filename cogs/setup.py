@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 from typing import Optional
 import discord
 from discord import app_commands
@@ -584,7 +585,7 @@ class SetupCog(commands.Cog):
             from utils.card_renderer import render_card
             from utils.levels_engine import level_from_xp
             level, xp_in, xp_needed = level_from_xp(500)
-            buffer = await render_card(interaction.user.name, interaction.user.display_avatar.url, level, xp_in, xp_needed, 1)
+            buffer = await asyncio.to_thread(render_card, interaction.user.name, interaction.user.display_avatar.url, level, xp_in, xp_needed, 1)
             await canal.send(content="🧪 Test de `/card`:", file=discord.File(buffer, filename="test_card.png"))
             ok("Renderizado de /card")
         except Exception as e:
@@ -595,7 +596,7 @@ class SetupCog(commands.Cog):
             from utils.card_renderer import render_leaderboard
             entries = [{"username": interaction.user.name, "avatar_url": interaction.user.display_avatar.url, "stat_text": "Nivel 5 • 500 XP", "ratio": 0.5}]
             guild_icon = interaction.guild.icon.url if interaction.guild.icon else None
-            buffer = await render_leaderboard(interaction.guild.name, guild_icon, entries, "Test")
+            buffer = await asyncio.to_thread(render_leaderboard, interaction.guild.name, guild_icon, entries, "Test")
             await canal.send(content="🧪 Test de `/leaderboard`:", file=discord.File(buffer, filename="test_lb.png"))
             ok("Renderizado de /leaderboard")
         except Exception as e:
@@ -657,7 +658,7 @@ class SetupCog(commands.Cog):
         # --- Pillow TODO (todo renderizado con Pillow) ---
         try:
             from utils.card_renderer import render_suggestion
-            buf = await render_suggestion(interaction.user.name, interaction.user.display_avatar.url, "Sugerencia de prueba Pillow — todo en pillow", 12, 3, "pending")
+            buf = await asyncio.to_thread(render_suggestion, interaction.user.name, interaction.user.display_avatar.url, "Sugerencia de prueba Pillow — todo en pillow", 12, 3, "pending")
             await canal.send(content="🧪 Pillow sugerencia:", file=discord.File(buf, filename="test_suggestion.png"))
             ok("Pillow — render_suggestion OK (todo en pillow)")
         except Exception as e:

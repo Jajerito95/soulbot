@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import datetime
 import random
 from typing import Optional
@@ -114,7 +115,7 @@ class StreaksCog(commands.Cog):
                     nxt = cur_s + 1 if cur_s < 7 else 1
                     coins, xp, lbl = DAILY_STREAK_REWARDS[nxt]
                     data.append({"label": f"→ Próximo {lbl} +{coins}c +{xp}xp", "current": 0, "max": 0})
-            buf = await render_streaks_overview(target.display_name, target.display_avatar.url, data)
+            buf = await asyncio.to_thread(render_streaks_overview, target.display_name, target.display_avatar.url, data)
             file = discord.File(buf, filename="rachas.png")
             embed = base_embed("", COLOR, title=f"🔥 Rachas de {target.display_name}")
             embed.set_image(url="attachment://rachas.png")

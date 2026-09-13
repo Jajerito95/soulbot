@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import re
 from typing import Optional
 
@@ -105,7 +106,8 @@ class SanctionCog(commands.Cog):
         )
         try:
             from utils.card_renderer import render_sanction
-            buf = await render_sanction(
+            buf = await asyncio.to_thread(
+                render_sanction,
                 usuario.display_name,
                 usuario.display_avatar.url,
                 result["punishment"],

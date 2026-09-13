@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 from typing import Optional
 import discord
 from discord import app_commands
@@ -119,7 +120,8 @@ class WelcomeCog(commands.Cog):
         embed = build_welcome_embed(member, template)
         try:
             from utils.card_renderer import render_welcome
-            buf = await render_welcome(
+            buf = await asyncio.to_thread(
+                render_welcome,
                 member.display_name,
                 member.display_avatar.url,
                 guild.name,
@@ -165,7 +167,8 @@ class WelcomeCog(commands.Cog):
         embed = build_farewell_embed(member, template)
         try:
             from utils.card_renderer import render_welcome
-            buf = await render_welcome(
+            buf = await asyncio.to_thread(
+                render_welcome,
                 member.display_name,
                 member.display_avatar.url,
                 member.guild.name,

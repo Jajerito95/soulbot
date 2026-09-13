@@ -100,7 +100,7 @@ class MinigamesCog(commands.Cog):
         app_commands.Choice(name="Cara", value="cara"),
         app_commands.Choice(name="Cruz", value="cruz"),
     ])
-    async def coinflip(self, interaction: discord.Interaction, apuesta: app_commands.Range[int, 10, None], eleccion: app_commands.Choice[str]):
+    async def coinflip(self, interaction: discord.Interaction, apuesta: app_commands.Range[int, 10, 1000], eleccion: app_commands.Choice[str]):
         remaining = self._check_cooldown(interaction.user.id)
         if remaining:
             await interaction.response.send_message(embed=error_embed(f"Espera **{remaining:.0f}s** antes de jugar de nuevo."), ephemeral=True)
@@ -126,7 +126,7 @@ class MinigamesCog(commands.Cog):
 
     @app_commands.command(name="slots", description="Juega a la tragaperras con tus SoulCoins")
     @app_commands.describe(apuesta="Cantidad a apostar")
-    async def slots(self, interaction: discord.Interaction, apuesta: app_commands.Range[int, 10, None]):
+    async def slots(self, interaction: discord.Interaction, apuesta: app_commands.Range[int, 10, 1000]):
         remaining = self._check_cooldown(interaction.user.id)
         if remaining:
             await interaction.response.send_message(embed=error_embed(f"Espera **{remaining:.0f}s** antes de jugar de nuevo."), ephemeral=True)

@@ -167,7 +167,7 @@ class MissionsView(discord.ui.View):
             member = interaction.guild.get_member(self.user_id)
             username = member.display_name if member else "User"
             avatar = member.display_avatar.url if member else ""
-            buf = await render_missions_card(username, avatar, missions, new_claimed, today_str())
+            buf = await asyncio.to_thread(render_missions_card, username, avatar, missions, new_claimed, today_str())
             file = discord.File(buf, filename="missions.png")
             embed = base_embed(f"📋 Misiones — {today_str()}\n{new_claimed}/5 reclamadas", COLOR, title="📋 Misiones diarias")
             embed.set_image(url="attachment://missions.png")
@@ -300,7 +300,7 @@ class MissionsCog(commands.Cog):
             from utils.card_renderer import render_missions_card
             claimed = sum(1 for m in missions if int(m["claimed"]))
             date_label = today_str()
-            buf = await render_missions_card(target.display_name, target.display_avatar.url, missions, claimed, date_label)
+            buf = await asyncio.to_thread(render_missions_card, target.display_name, target.display_avatar.url, missions, claimed, date_label)
             file = discord.File(buf, filename="missions.png")
             embed = base_embed(f"📋 Misiones de **{target.display_name}** — {today_str()}\n{claimed}/5 reclamadas", COLOR, title="📋 Misiones diarias")
             embed.set_image(url="attachment://missions.png")

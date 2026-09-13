@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import html
 import os
 import discord
@@ -67,6 +68,8 @@ async def generate_transcript(channel: discord.TextChannel) -> str:
     full_html = TEMPLATE.format(channel_name=html.escape(channel.name), messages="\n".join(messages_html))
 
     path = os.path.join(TRANSCRIPTS_DIR, f"{channel.id}.html")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(full_html)
+    def _write():
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(full_html)
+    await asyncio.to_thread(_write)
     return path
