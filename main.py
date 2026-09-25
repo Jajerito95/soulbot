@@ -47,8 +47,11 @@ class SoulBot(commands.Bot):
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
             self.tree.copy_global_to(guild=guild)
+            # borra los globales para no ver comandos duplicados (global + server)
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync()
             await self.tree.sync(guild=guild)
-            log.info(f"Comandos slash sincronizados al instante en el servidor {GUILD_ID}.")
+            log.info(f"Comandos slash sincronizados al instante en el servidor {GUILD_ID} (globales limpiados).")
         else:
             await self.tree.sync()
             log.info("Comandos slash sincronizados globalmente (puede tardar hasta 1h en propagarse).")
