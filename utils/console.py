@@ -50,6 +50,7 @@ HELP_TEXT = """╭─ 📨 MENSAJES ──────────────�
 ╭─ ⚙️ SISTEMA ──────────────────────────────╮
   stats / servers / cogs / reload / sync
   snapshot                  Snapshot manual de niveles/coins
+  dbstatus                  Estado de Turso ahora mismo
   clear / stop
 ╰──────────────────────────────────────────╯"""
 
@@ -401,6 +402,24 @@ async def _cmd_snapshot(bot, args):
     _out(f"✅ Snapshot guardado: {users} usuarios → {path}")
 
 
+async def _cmd_dbstatus(bot, args):
+    import database as db
+    import time as _t
+    mode = "Turso ☁️" if db.USING_TURSO else "SQLite local 💾"
+    try:
+        t = _t.perf_counter()
+        cur = await db.db().execute("SELECT 1")
+        await cur.fetchone()
+        ms = round((_t.perf_counter() - t) * 1000)
+        w = bot.get_cog("DbWatchCog")
+        fails = getattr(w, "fails", 0) if w else 0
+        down = getattr(w, "down", False) if w else False
+        state = "🚨 CAÍDA" if down else "✅ OK"
+        _out(f"💾 DB: {mode} | {state} | ping {ms}ms | fallos seguidos: {fails}")
+    except Exception as e:
+        _out(f"🚨 DB CAÍDA ({mode}): {e}")
+
+
 COMMANDS = {
     "say": _cmd_say, "dm": _cmd_dm,
     "channels": _cmd_channels, "user": _cmd_user, "roles": _cmd_roles,
@@ -411,6 +430,7 @@ COMMANDS = {
     "coins": _cmd_coins, "addcoins": _cmd_addcoins,
     "stats": _cmd_stats, "servers": _cmd_servers, "cogs": _cmd_cogs,
     "reload": _cmd_reload, "sync": _cmd_sync, "snapshot": _cmd_snapshot,
+    "dbstatus": _cmd_dbstatus,
 }
 
 
