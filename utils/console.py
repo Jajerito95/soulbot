@@ -48,7 +48,9 @@ HELP_TEXT = """╭─ 📨 MENSAJES ──────────────�
   addcoins <user> <cant>      Dar/quitar (negativo quita)
 ╰─────────────────────────────────────────╯
 ╭─ ⚙️ SISTEMA ──────────────────────────────╮
-  stats / servers / cogs / reload / sync / clear / stop
+  stats / servers / cogs / reload / sync
+  snapshot                  Snapshot manual de niveles/coins
+  clear / stop
 ╰──────────────────────────────────────────╯"""
 
 
@@ -376,6 +378,29 @@ async def _cmd_sync(bot, args):
         _out(f"✅ {len(synced)} comandos globales")
 
 
+async def _cmd_snapshot(bot, args):
+    import database as db
+    import json as _json
+    import os as _os
+    from config import DATA_DIR as _DATA
+    g = bot.guilds[0] if len(bot.guilds) == 1 else None
+    if g is None:
+        _out("Varios servidores: no soportado desde consola.")
+        return
+    data = await db.export_user_data(g.id)
+    users = len(data.get("levels", []))
+    ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+    path = _os.path.join(_DATA, "backups", f"manual_users_{g.id}_{ts}.json")
+    _os.makedirs(_os.path.dirname(path), exist_ok=True)
+
+    def _write():
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(data, f, ensure_ascii=False)
+
+    await asyncio.to_thread(_write)
+    _out(f"✅ Snapshot guardado: {users} usuarios → {path}")
+
+
 COMMANDS = {
     "say": _cmd_say, "dm": _cmd_dm,
     "channels": _cmd_channels, "user": _cmd_user, "roles": _cmd_roles,
@@ -385,7 +410,7 @@ COMMANDS = {
     "role": _cmd_role, "purge": _cmd_purge,
     "coins": _cmd_coins, "addcoins": _cmd_addcoins,
     "stats": _cmd_stats, "servers": _cmd_servers, "cogs": _cmd_cogs,
-    "reload": _cmd_reload, "sync": _cmd_sync,
+    "reload": _cmd_reload, "sync": _cmd_sync, "snapshot": _cmd_snapshot,
 }
 
 

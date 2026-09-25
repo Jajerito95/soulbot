@@ -6,7 +6,7 @@ import datetime
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import database as db
 from utils.embeds import success_embed, error_embed, base_embed
@@ -15,10 +15,53 @@ from config import COLOR, DATA_DIR
 BACKUPS_DIR = os.path.join(DATA_DIR, "backups")
 os.makedirs(BACKUPS_DIR, exist_ok=True)
 
+AUTO_KEEP = 5  # snapshots automáticos a conservar por servidor
+
 
 class BackupsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.auto_snapshot.start()
+
+    def cog_unload(self):
+        self.auto_snapshot.cancel()
+
+    @tasks.loop(hours=6)
+    async def auto_snapshot(self):
+        """Snapshot automático de niveles/coins/etc. a disco (en Orihost persiste)."""
+        for guild in self.bot.guilds:
+            try:
+                data = await db.export_user_data(guild.id)
+                data["_meta"] = {
+                    "kind": "auto_users",
+                    "guild_id": guild.id,
+                    "guild_name": guild.name,
+                    "created_at": datetime.datetime.utcnow().isoformat(),
+                }
+                filename = f"auto_users_{guild.id}_{int(datetime.datetime.utcnow().timestamp())}.json"
+                path = os.path.join(BACKUPS_DIR, filename)
+
+                def _write(p=path, d=data):
+                    with open(p, "w", encoding="utf-8") as f:
+                        json.dump(d, f, ensure_ascii=False)
+
+                await asyncio.to_thread(_write)
+
+                def _prune(gid=guild.id):
+                    files = sorted(f for f in os.listdir(BACKUPS_DIR) if f.startswith(f"auto_users_{gid}_"))
+                    for old in files[:-AUTO_KEEP]:
+                        try:
+                            os.remove(os.path.join(BACKUPS_DIR, old))
+                        except Exception:
+                            pass
+
+                await asyncio.to_thread(_prune)
+            except Exception:
+                pass
+
+    @auto_snapshot.before_loop
+    async def _auto_before(self):
+        await self.bot.wait_until_ready()
 
     backup_group = app_commands.Group(
         name="backup",
@@ -86,6 +129,37 @@ class BackupsCog(commands.Cog):
             )
         )
 
+    @backup_group.command(name="restore_users", description="Restaura niveles/coins desde un snapshot (SOBREESCRIBE datos de usuarios)")
+    @app_commands.describe(archivo="Archivo auto_users_*.json o manual", confirmar="Escribe CONFIRMAR para continuar")
+    async def restore_users(self, interaction: discord.Interaction, archivo: discord.Attachment, confirmar: str):
+        if confirmar.strip().upper() != "CONFIRMAR":
+            await interaction.response.send_message(
+                embed=error_embed("Debes escribir exactamente `CONFIRMAR`. Nada se ha tocado."),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        try:
+            raw = await archivo.read()
+            data = json.loads(raw.decode("utf-8"))
+        except Exception:
+            await interaction.followup.send(embed=error_embed("Ese archivo no es un snapshot válido."))
+            return
+
+        if "levels" not in data or "economy" not in data:
+            await interaction.followup.send(embed=error_embed("Ese archivo no es un snapshot de usuarios (falta levels/economy)."))
+            return
+
+        await db.import_user_data(interaction.guild_id, data)
+        meta = data.get("_meta", {})
+        await interaction.followup.send(
+            embed=success_embed(
+                f"Niveles, coins, rachas y misiones restaurados.\n🕐 Snapshot de: {meta.get('created_at', 'desconocida')}",
+                title="✅ Usuarios restaurados",
+            )
+        )
+
     @backup_group.command(name="list", description="Lista los backups guardados en este host")
     async def list_backups(self, interaction: discord.Interaction):
         def _list_backups():
@@ -104,8 +178,8 @@ class BackupsCog(commands.Cog):
             lines.append(f"🗂️ `{f}` — <t:{ts}:f>")
 
         embed = base_embed(
-            "\n".join(lines) + "\n\n⚠️ Estos archivos viven en disco local y **se pierden en cada redeploy** de Render. "
-            "Guarda los backups importantes descargándolos de Discord.",
+            "\n".join(lines) + "\n\n⚠️ Viven en el disco del host (en Orihost persiste entre reinicios). "
+            "Descarga los importantes de todas formas.",
             COLOR,
             title="💾 Backups disponibles",
         )

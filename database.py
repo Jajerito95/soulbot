@@ -1073,6 +1073,44 @@ async def import_guild_data(guild_id: int, data: dict):
         )
 
 
+# Tablas con datos de usuarios para snapshots de emergencia (todas tienen guild_id)
+USER_SNAPSHOT_TABLES = [
+    "levels", "economy", "streaks", "user_missions", "user_multipliers",
+    "user_cards", "infraction_counts", "automod_warnings", "temp_bans", "work_cooldown",
+]
+
+
+async def export_user_data(guild_id: int) -> dict:
+    """Snapshot de datos de usuarios (niveles, coins, rachas, misiones...). Para emergencias si Turso cae."""
+    data = {}
+    for table in USER_SNAPSHOT_TABLES:
+        try:
+            cur = await _db.execute(f"SELECT * FROM {table} WHERE guild_id = ?", (guild_id,))
+            cols = [d[0] for d in cur.description]
+            data[table] = [dict(zip(cols, row)) for row in await cur.fetchall()]
+        except Exception:
+            data[table] = []
+    return data
+
+
+async def import_user_data(guild_id: int, data: dict):
+    """Restaura un snapshot de export_user_data. BORRA los datos actuales del servidor."""
+    for table in USER_SNAPSHOT_TABLES:
+        rows = data.get(table)
+        if not rows:
+            continue
+        await _db.execute(f"DELETE FROM {table} WHERE guild_id = ?", (guild_id,))
+        for row in rows:
+            row = {k: v for k, v in dict(row).items() if k != "guild_id"}
+            cols = ", ".join(["guild_id"] + list(row.keys()))
+            placeholders = ", ".join(["?"] * (len(row) + 1))
+            await _db.execute(
+                f"INSERT INTO {table} ({cols}) VALUES ({placeholders})",
+                (guild_id, *row.values()),
+            )
+    await _db.commit()
+
+
 # ---------- roles temporales ----------
 
 async def add_temp_role(guild_id: int, user_id: int, role_id: int, expires_at: str, assigned_by: int):
