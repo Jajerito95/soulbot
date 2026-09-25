@@ -27,8 +27,13 @@ HELP_TEXT = """╭─ 📨 MENSAJES ──────────────�
 ╰─────────────────────────────────────────╯
 ╭─ 🛡️ MODERACIÓN ────────────────────────────╮
   kick <server> <user> [razón]   Expulsar
-  ban <server> <user> [razón]    Banear (temporal si hay _migrations, si no manual)
+  ban <server> <user> [razón]    Banear
   unban <server> <user>          Desbanear
+  timeout <server> <user> <min> [razón]  Silenciar X min (0 quita)
+  slowmode <canal> <seg>         Slowmode (0 quita)
+  nick <server> <user> <nick|none>  Cambiar apodo
+  role <server> <user> <add|del> <rol_id>  Dar/quitar rol
+  purge <canal> <cant>           Borrar últimos N msgs (máx 100)
 ╰─────────────────────────────────────────╯
 ╭─ 💰 ECONOMÍA ─────────────────────────────╮
   coins <server> <user>       Ver balance
@@ -155,6 +160,70 @@ async def _cmd_unban(bot, args):
     _out(f"✅ {args[1]} desbaneado de {g.name}")
 
 
+async def _member(bot, gid: str, uid: str):
+    g = await _resolve_guild(bot, gid)
+    m = g.get_member(int(uid))
+    if m is None:
+        m = await g.fetch_member(int(uid))
+    return g, m
+
+
+async def _cmd_timeout(bot, args):
+    if len(args) < 3:
+        _out("Uso: timeout <server_id> <usuario_id> <minutos> [razón]  (0 = quitar)")
+        return
+    g, m = await _member(bot, args[0], args[1])
+    mins = int(args[2])
+    reason = args[3] if len(args) > 3 else "Timeout desde consola"
+    until = None if mins <= 0 else discord.utils.utcnow() + datetime.timedelta(minutes=mins)
+    await m.timeout(until, reason=reason)
+    _out(f"✅ {'Timeout quitado a' if mins <= 0 else f'Silenciado {mins} min:'} {m} en {g.name}")
+
+
+async def _cmd_slowmode(bot, args):
+    if len(args) != 2:
+        _out("Uso: slowmode <canal_id> <segundos>  (0 = quitar)")
+        return
+    ch = await _resolve_channel(bot, args[0])
+    await ch.edit(slowmode_delay=int(args[1]))
+    _out(f"✅ Slowmode de #{getattr(ch, 'name', args[0])}: {args[1]}s")
+
+
+async def _cmd_nick(bot, args):
+    if len(args) < 3:
+        _out("Uso: nick <server_id> <usuario_id> <nick|none>")
+        return
+    g, m = await _member(bot, args[0], args[1])
+    nick = None if args[2].lower() == "none" else args[2]
+    await m.edit(nick=nick, reason="Cambio desde consola")
+    _out(f"✅ Apodo de {m}: {nick or '(reseteado)'}")
+
+
+async def _cmd_role(bot, args):
+    if len(args) != 4 or args[2] not in ("add", "del"):
+        _out("Uso: role <server_id> <usuario_id> <add|del> <rol_id>")
+        return
+    g, m = await _member(bot, args[0], args[1])
+    role = g.get_role(int(args[3]))
+    if role is None:
+        raise ValueError(f"Rol {args[3]} no existe en {g.name}")
+    if args[2] == "add":
+        await m.add_roles(role, reason="Rol desde consola")
+    else:
+        await m.remove_roles(role, reason="Rol desde consola")
+    _out(f"✅ Rol @{role.name} {'dado a' if args[2] == 'add' else 'quitado a'} {m}")
+
+
+async def _cmd_purge(bot, args):
+    if len(args) != 2:
+        _out("Uso: purge <canal_id> <cantidad>  (máx 100)")
+        return
+    ch = await _resolve_channel(bot, args[0])
+    n = min(100, max(1, int(args[1])))
+    deleted = await ch.purge(limit=n)
+    _out(f"✅ {len(deleted)} mensajes borrados en #{getattr(ch, 'name', args[0])}")
+
+
 async def _cmd_coins(bot, args):
     if len(args) != 2:
         _out("Uso: coins <server_id> <usuario_id>")
@@ -219,6 +288,11 @@ COMMANDS = {
     "kick": _cmd_kick,
     "ban": _cmd_ban,
     "unban": _cmd_unban,
+    "timeout": _cmd_timeout,
+    "slowmode": _cmd_slowmode,
+    "nick": _cmd_nick,
+    "role": _cmd_role,
+    "purge": _cmd_purge,
     "coins": _cmd_coins,
     "addcoins": _cmd_addcoins,
     "stats": _cmd_stats,
@@ -262,8 +336,10 @@ async def console_loop(bot):
             if cmd in ("say", "dm", "embed"):
                 sub = raw_args.split(maxsplit=1)
                 call_args = sub if len(sub) == 2 else sub
-            elif cmd in ("kick", "ban"):
-                sub = raw_args.split(maxsplit=2)
+            elif cmd == "nick":
+                call_args = raw_args.split(maxsplit=2)
+            elif cmd in ("kick", "ban", "timeout"):
+                sub = raw_args.split(maxsplit=3)
                 call_args = sub
             else:
                 call_args = raw_args.split() if raw_args else []
