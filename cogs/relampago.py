@@ -119,7 +119,12 @@ class RelampagoView(discord.ui.View):
 
     @discord.ui.button(label="⚡ Reclamar (0/3)", style=discord.ButtonStyle.primary, custom_id="soulbot:relampago:0")
     async def claim_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.NotFound:
+            return  # interacción caducada (>3s), no hay nada que responder
+        except discord.errors.InteractionResponded:
+            pass
         try:
             eid = int(interaction.data["custom_id"].split(":")[-1])
         except:
