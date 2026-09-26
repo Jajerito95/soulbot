@@ -1,5 +1,7 @@
 from __future__ import annotations
+import bisect
 import datetime
+import time as _time
 from zoneinfo import ZoneInfo
 
 import discord
@@ -14,29 +16,39 @@ def xp_for_level(level: int) -> int:
     return 5 * (level ** 2) + 50 * level + 100
 
 
+# tabla acumulada precalculada: CUM[l] = XP total para llegar al nivel l (O(1) por bisect)
+_CUM = [0]
+for _l in range(1001):
+    _CUM.append(_CUM[-1] + xp_for_level(_l))
+
+
 def level_from_xp(xp: int) -> tuple[int, int, int]:
     """Devuelve (nivel_actual, xp_en_nivel_actual, xp_necesaria_para_subir)."""
-    level = 0
-    remaining = xp
-    while remaining >= xp_for_level(level):
-        remaining -= xp_for_level(level)
-        level += 1
-        if level > 1000:  # salvaguarda
-            break
-    return level, remaining, xp_for_level(level)
+    level = min(bisect.bisect_right(_CUM, xp) - 1, 1000)
+    return level, xp - _CUM[level], xp_for_level(level)
+
+
+_weekend_cache: tuple[float, bool] = (0.0, False)
 
 
 def is_weekend_bonus_now() -> bool:
+    global _weekend_cache
+    now_ts = _time.time()
+    if now_ts - _weekend_cache[0] < 60:
+        return _weekend_cache[1]
     now = datetime.datetime.now(TZ)
     weekday = now.weekday()  # lunes=0 ... domingo=6
     # jueves (3) 23:00 -> domingo (6) 23:00
     if weekday == 3 and now.hour >= 23:
-        return True
-    if weekday in (4, 5):
-        return True
-    if weekday == 6 and now.hour < 23:
-        return True
-    return False
+        res = True
+    elif weekday in (4, 5):
+        res = True
+    elif weekday == 6 and now.hour < 23:
+        res = True
+    else:
+        res = False
+    _weekend_cache = (now_ts, res)
+    return res
 
 
 def _not_expired(expires_at: str | None) -> bool:

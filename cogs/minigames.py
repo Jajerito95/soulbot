@@ -88,6 +88,9 @@ class MinigamesCog(commands.Cog):
         """Devuelve segundos restantes de cooldown (0 si puede jugar)."""
         now = time.time()
         last = self.cooldowns.get(user_id, 0)
+        if last and now - last > GAME_COOLDOWN * 6:
+            self.cooldowns.pop(user_id, None)
+            return 0
         remaining = GAME_COOLDOWN - (now - last)
         return max(0, remaining)
 

@@ -3,6 +3,7 @@ import datetime
 import random
 import os
 import io
+import time
 from typing import Optional
 
 import asyncio
@@ -66,7 +67,8 @@ def render_boss_pillow(boss_name: str, current_hp: int, max_hp: int,
                               total_damage_dealt: int) -> bytes | None:
     """Renderiza la tarjeta del boss con layout nuevo: nombre, imagen, HP, top3, recompensas."""
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw
+        from utils.card_renderer import _vgradient, _hgradient, _font, _download_sync
         import io
 
         W, H = 934, 400
@@ -74,11 +76,7 @@ def render_boss_pillow(boss_name: str, current_hp: int, max_hp: int,
         accent = (231, 76, 60)
         accent_light = (255, 120, 100)
 
-        base = Image.new("RGBA", (W, H), BG + (255,))
-        bdraw = ImageDraw.Draw(base)
-        for y in range(H):
-            t = y / H
-            bdraw.line([(0, y), (W, y)], fill=(int(20 + t * 30), int(16 + t * 10), int(16 + t * 10), 255))
+        base = _vgradient(W, H, BG, (50, 26, 26))
 
         # diagonal accent rojo sutil
         overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -90,10 +88,7 @@ def render_boss_pillow(boss_name: str, current_hp: int, max_hp: int,
         img_x, img_y = 28, 60
         if image_url:
             try:
-                import urllib.request
-                req = urllib.request.Request(image_url, headers={"User-Agent": "SoulBot/1.0"})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = resp.read()
+                data = _download_sync(image_url)
                 bimg = Image.open(io.BytesIO(data)).convert("RGBA").resize((280, 280), Image.LANCZOS)
                 m = Image.new("L", (280, 280), 0)
                 ImageDraw.Draw(m).rounded_rectangle([0, 0, 280, 280], radius=28, fill=255)
@@ -109,15 +104,11 @@ def render_boss_pillow(boss_name: str, current_hp: int, max_hp: int,
         card.paste(base, (0, 0), mask)
         draw = ImageDraw.Draw(card)
 
-        try:
-            font_title = ImageFont.truetype(_FONT_BOLD, 36)
-            font_r = ImageFont.truetype(_FONT_REG, 20)
-            font_s = ImageFont.truetype(_FONT_REG, 16)
-            font_reward = ImageFont.truetype(_FONT_BOLD, 18)
-            font_small = ImageFont.truetype(_FONT_REG, 14)
-        except Exception:
-            font_title = ImageFont.load_default()
-            font_r = font_s = font_reward = font_small = font_title
+        font_title = _font(_FONT_BOLD, 36)
+        font_r = _font(_FONT_REG, 20)
+        font_s = _font(_FONT_REG, 16)
+        font_reward = _font(_FONT_BOLD, 18)
+        font_small = _font(_FONT_REG, 14)
 
         tx = 340 if image_url else 28
 
@@ -130,14 +121,7 @@ def render_boss_pillow(boss_name: str, current_hp: int, max_hp: int,
         draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], radius=16, fill=(45, 40, 40, 255), outline=(60, 40, 40, 255), width=1)
         fill_w = int(bar_w * pct)
         if fill_w > 4:
-            fimg = Image.new("RGBA", (fill_w, bar_h), (0, 0, 0, 0))
-            fd = ImageDraw.Draw(fimg)
-            for x in range(fill_w):
-                t = x / max(1, fill_w)
-                r = int(231 * (1 - t) + 255 * t)
-                g = int(76 * (1 - t) + 100 * t)
-                b = int(60 * (1 - t) + 60 * t)
-                fd.line([(x, 0), (x, bar_h)], fill=(r, g, b, 255))
+            fimg = _hgradient(fill_w, bar_h, (231, 76, 60), (255, 100, 60))
             fm = Image.new("L", (fill_w, bar_h), 0)
             ImageDraw.Draw(fm).rounded_rectangle([0, 0, fill_w, bar_h], radius=16, fill=255)
             if pct < 0.98:
@@ -195,7 +179,8 @@ class BossCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._msg_counter: dict[int, int] = {}  # guild_id -> message count since last post
-        self._last_boss_msg: dict[int, discord.Message] = {}  # guild_id -> last boss embed msg
+        self._last_boss_msg: dict[int, tuple[int, int]] = {}  # guild_id -> (channel_id, message_id), sin retener Message
+        self._last_repost: dict[int, float] = {}  # guild_id -> timestamp último repost
 
     boss = app_commands.Group(name="boss", description="Boss semanal")
 
@@ -245,11 +230,11 @@ class BossCog(commands.Cog):
 
         try:
             msg = await ch.send(embed=embed, view=None, file=file) if file else await ch.send(embed=embed)
-            self._last_boss_msg[interaction.guild_id] = msg
+            self._last_boss_msg[interaction.guild_id] = (ch.id, msg.id)
             self._msg_counter[interaction.guild_id] = 0
         except Exception:
             msg = await ch.send(embed=embed)
-            self._last_boss_msg[interaction.guild_id] = msg
+            self._last_boss_msg[interaction.guild_id] = (ch.id, msg.id)
 
         await interaction.response.send_message(
             embed=success_embed(f"Boss **{nombre}** creado en {ch.mention} con **{hp:,} HP**\nDaño: XP × 5", title="👹 Boss creado"),
@@ -405,12 +390,13 @@ class BossCog(commands.Cog):
         new_hp = result["new_hp"]
         await register_boss_damage(boss["id"], guild_id, user_id, dmg)
 
-        # auto-repost card cada 5 mensajes
+        # auto-repost card cada 5 mensajes, mínimo 60s entre renders (Pillow quema CPU)
         count = self._msg_counter.get(guild_id, 0) + 1
         self._msg_counter[guild_id] = count
 
-        if count >= BOSS_POST_INTERVAL:
+        if count >= BOSS_POST_INTERVAL and time.time() - self._last_repost.get(guild_id, 0) >= 60:
             self._msg_counter[guild_id] = 0
+            self._last_repost[guild_id] = time.time()
             await self._repost_boss_card(guild_id, boss)
 
         if new_hp <= 0:
@@ -460,16 +446,17 @@ class BossCog(commands.Cog):
         embed.set_footer(text=f"Boss ID {boss['id']} • SoulSeeker™")
 
         # intentar editar el último msg, si no, enviar nuevo
-        last_msg = self._last_boss_msg.get(guild_id)
-        if last_msg:
+        ref = self._last_boss_msg.get(guild_id)
+        if ref:
             try:
-                await last_msg.edit(embed=embed, attachments=[file])
+                old = await channel.fetch_message(ref[1])
+                await old.edit(embed=embed, attachments=[file])
                 return
             except Exception:
                 pass
         try:
             msg = await channel.send(embed=embed, file=file)
-            self._last_boss_msg[guild_id] = msg
+            self._last_boss_msg[guild_id] = (channel.id, msg.id)
         except Exception:
             pass
 

@@ -270,7 +270,7 @@ class GiveawaysCog(commands.Cog):
         try: self.check_loop.cancel()
         except: pass
 
-    @tasks.loop(seconds=30)
+    @tasks.loop(seconds=60)
     async def check_loop(self):
         try:
             await self.bot.wait_until_ready()

@@ -21,24 +21,22 @@ _FONT_REG_PATH = os.path.join(_FONT_DIR, "Outfit-Regular.ttf")
 
 def render_lightning_banner(reward_min: int = 300, reward_max: int = 800) -> io.BytesIO:
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw
+        from utils.card_renderer import _vgradient, _font
+        import os as _os
         w, h = 1000, 340
-        img = Image.new("RGBA", (w, h), (15, 15, 30, 255))
+        img = _vgradient(w, h, (15, 15, 30), (35, 30, 85))
         draw = ImageDraw.Draw(img)
-        # dark gradient
-        for y in range(h):
-            t = y / h
-            r = int(15 + t * 20)
-            g = int(15 + t * 15)
-            b = int(30 + t * 55)
-            draw.line([(0, y), (w, y)], fill=(r, g, b, 255))
-        # glow background — radial amarillo suave
+        # glow background — radial amarillo suave (1 elipse + blur en vez de 45)
         glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         gdraw = ImageDraw.Draw(glow)
         cx, cy = 340, 170
-        for radius in range(180, 0, -4):
-            alpha = int(18 * (1 - radius / 180))
-            gdraw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=(255, 255, 100, alpha))
+        gdraw.ellipse((cx - 180, cy - 180, cx + 180, cy + 180), fill=(255, 255, 100, 16))
+        try:
+            from PIL import ImageFilter
+            glow = glow.filter(ImageFilter.GaussianBlur(40))
+        except Exception:
+            pass
         img = Image.alpha_composite(img, glow)
         draw = ImageDraw.Draw(img)
         # THICK lightning bolt — polygon with width
@@ -76,15 +74,11 @@ def render_lightning_banner(reward_min: int = 300, reward_max: int = 800) -> io.
         img = Image.alpha_composite(img, glow_overlay)
         draw = ImageDraw.Draw(img)
 
-        # fonts
-        try:
-            font_title = ImageFont.truetype(_FONT_BOLD_PATH, 64)
-            font_sub = ImageFont.truetype(_FONT_REG_PATH, 24)
-            font_reward = ImageFont.truetype(_FONT_BOLD_PATH, 28)
-        except:
-            font_title = ImageFont.load_default()
-            font_sub = ImageFont.load_default()
-            font_reward = ImageFont.load_default()
+        # fonts (cacheadas)
+        _fd = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "assets", "fonts")
+        font_title = _font(_os.path.join(_fd, "Outfit-Bold.ttf"), 64)
+        font_sub = _font(_os.path.join(_fd, "Outfit-Regular.ttf"), 24)
+        font_reward = _font(_os.path.join(_fd, "Outfit-Bold.ttf"), 28)
 
         # title
         tx = 520
@@ -102,7 +96,7 @@ def render_lightning_banner(reward_min: int = 300, reward_max: int = 800) -> io.
         card.paste(img, (0, 0), mask)
 
         buf = io.BytesIO()
-        card.convert("RGB").save(buf, format="PNG")
+        card.convert("RGB").save(buf, format="PNG", compress_level=1)
         buf.seek(0)
         return buf
     except Exception:

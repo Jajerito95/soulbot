@@ -471,5 +471,6 @@ class CodeSyncCog(commands.Cog):
             f"Quien lo canjee con `/code {code}` recibira el rol automaticamente."))
 
 async def setup(bot: commands.Bot):
-    await asyncio.to_thread(migrate_role_column)
+    if POSTGRES_URL:
+        await asyncio.to_thread(migrate_role_column)
     await bot.add_cog(CodeSyncCog(bot))

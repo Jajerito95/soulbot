@@ -437,7 +437,17 @@ def db():
     return _db
 
 
+import time as _time
+
+_guild_config_cache: dict[int, tuple[float, dict]] = {}
+_GUILD_CONFIG_TTL = 45.0  # la config cambia poco; ahorra 4-6 queries por mensaje
+
+
 async def get_guild_config(guild_id: int) -> dict:
+    now = _time.time()
+    cached = _guild_config_cache.get(guild_id)
+    if cached and now - cached[0] < _GUILD_CONFIG_TTL:
+        return cached[1]
     cur = await _db.execute("SELECT * FROM guild_config WHERE guild_id = ?", (guild_id,))
     row = await cur.fetchone()
     if row is None:
@@ -445,7 +455,9 @@ async def get_guild_config(guild_id: int) -> dict:
         await _db.commit()
         return await get_guild_config(guild_id)
     cols = [d[0] for d in cur.description]
-    return dict(zip(cols, row))
+    config = dict(zip(cols, row))
+    _guild_config_cache[guild_id] = (now, config)
+    return config
 
 
 async def update_guild_config(guild_id: int, **fields):
@@ -454,6 +466,7 @@ async def update_guild_config(guild_id: int, **fields):
     values = list(fields.values()) + [guild_id]
     await _db.execute(f"UPDATE guild_config SET {set_clause} WHERE guild_id = ?", values)
     await _db.commit()
+    _guild_config_cache.pop(guild_id, None)  # invalida caché
 
 
 # ---------- votos de sugerencias (un voto por usuario) ----------
@@ -765,6 +778,19 @@ async def get_leaderboard_alltime(guild_id: int, limit: int = 10) -> list[tuple[
         "SELECT user_id, xp, level FROM levels WHERE guild_id = ? ORDER BY xp DESC LIMIT ?", (guild_id, limit)
     )
     return await cur.fetchall()
+
+
+async def get_user_rank(guild_id: int, user_id: int) -> int:
+    """Posición del usuario sin descargar 1000 filas."""
+    cur = await _db.execute("SELECT xp FROM levels WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+    row = await cur.fetchone()
+    if not row:
+        cur2 = await _db.execute("SELECT COUNT(*) FROM levels WHERE guild_id = ?", (guild_id,))
+        return (await cur2.fetchone())[0] + 1
+    cur2 = await _db.execute(
+        "SELECT COUNT(*) + 1 FROM levels WHERE guild_id = ? AND xp > ?", (guild_id, row[0])
+    )
+    return (await cur2.fetchone())[0]
 
 
 async def get_leaderboard_period(guild_id: int, days: int, limit: int = 10) -> list[tuple[int, int]]:

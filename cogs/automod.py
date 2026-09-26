@@ -21,6 +21,17 @@ CAPS_MIN_LEN = 15
 CAPS_RATIO = 0.8
 GHOST_PING_WINDOW = 5
 
+def _prune_old(dq, now: float, window: float) -> bool:
+    """Quita entradas viejas del deque. Devuelve True si quedó vacío."""
+    while dq:
+        oldest = dq[0]
+        ts = oldest[1] if isinstance(oldest, tuple) else oldest
+        if now - ts <= window:
+            break
+        dq.popleft()
+    return not dq
+
+
 # categoría interna -> (columna de config, clave de infracción del catálogo, nombre legible)
 CATEGORIES = {
     "spam": ("automod_spam", "spam", "Spam"),
@@ -42,12 +53,16 @@ class AutoModCog(commands.Cog):
     def cog_unload(self):
         self._cache_cleanup.cancel()
 
-    @tasks.loop(minutes=10)
+    @tasks.loop(minutes=1)
     async def _cache_cleanup(self):
-        cutoff = asyncio.get_event_loop().time() - 3600
-        expired = [mid for mid, (ts, _) in self.ping_cache.items() if ts < cutoff]
-        for mid in expired:
+        now = time.time()
+        cutoff = now - 10
+        for mid in [mid for mid, (ts, _) in self.ping_cache.items() if ts < cutoff]:
             del self.ping_cache[mid]
+        # purga usuarios inactivos de los deques (las keys externas nunca se borraban)
+        for store, window in ((self.recent_messages, FLOOD_WINDOW), (self.recent_content, SPAM_WINDOW)):
+            for uid in [uid for uid, dq in store.items() if _prune_old(dq, now, window)]:
+                store.pop(uid, None)
 
     async def _category_enabled(self, guild_id: int, category: str) -> bool:
         config = await db.get_guild_config(guild_id)
@@ -101,34 +116,47 @@ class AutoModCog(commands.Cog):
 
         now = time.time()
         user_id = message.author.id
+        content = message.content or ""
 
-        if await self._category_enabled(message.guild.id, "flood"):
-            self.recent_messages[user_id].append(now)
-            recent = [t for t in self.recent_messages[user_id] if now - t <= FLOOD_WINDOW]
-            if len(recent) >= FLOOD_COUNT:
-                self.recent_messages[user_id].clear()
+        # 1 sola query (con caché de 45s) en vez de 5
+        config = await db.get_guild_config(message.guild.id)
+        if not config["automod_enabled"]:
+            return
+
+        if config[CATEGORIES["flood"][0]]:
+            dq = self.recent_messages[user_id]
+            dq.append(now)
+            _prune_old(dq, now, FLOOD_WINDOW)
+            if len(dq) >= FLOOD_COUNT:
+                dq.clear()
                 await self._trigger(message, "flood", "Detectado por AutoMod: flood de mensajes")
                 return
 
-        if await self._category_enabled(message.guild.id, "spam") and message.content:
-            self.recent_content[user_id].append((message.content, now))
-            same = [c for c, t in self.recent_content[user_id] if c == message.content and now - t <= SPAM_WINDOW]
-            if len(same) >= SPAM_REPEATS:
-                self.recent_content[user_id].clear()
+        if config[CATEGORIES["spam"][0]] and content:
+            dq = self.recent_content[user_id]
+            dq.append((content, now))
+            _prune_old(dq, now, SPAM_WINDOW)
+            same = sum(1 for c, _ in dq if c == content)
+            if same >= SPAM_REPEATS:
+                dq.clear()
                 await self._trigger(message, "spam", "Detectado por AutoMod: mensaje repetido")
                 return
 
-        if await self._category_enabled(message.guild.id, "ads") and INVITE_RE.search(message.content or ""):
+        if config[CATEGORIES["ads"][0]] and "discord" in content.lower() and INVITE_RE.search(content):
             await self._trigger(message, "ads", "Detectado por AutoMod: enlace de invitación")
             return
 
-        if await self._category_enabled(message.guild.id, "caps"):
-            letters = [c for c in message.content if c.isalpha()]
-            if len(letters) >= CAPS_MIN_LEN:
-                upper_ratio = sum(1 for c in letters if c.isupper()) / len(letters)
-                if upper_ratio >= CAPS_RATIO:
-                    await self._trigger(message, "caps", "Detectado por AutoMod: uso excesivo de mayúsculas")
-                    return
+        if config[CATEGORIES["caps"][0]] and len(content) >= CAPS_MIN_LEN:
+            # 1 sola pasada, sin crear lista
+            letters = upper = 0
+            for c in content:
+                if c.isalpha():
+                    letters += 1
+                    if c.isupper():
+                        upper += 1
+            if letters >= CAPS_MIN_LEN and upper / letters >= CAPS_RATIO:
+                await self._trigger(message, "caps", "Detectado por AutoMod: uso excesivo de mayúsculas")
+                return
 
         if message.mentions:
             self.ping_cache[message.id] = (now, True)

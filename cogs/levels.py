@@ -158,6 +158,11 @@ class LevelsCog(commands.Cog):
         if now - last < cooldown:
             return
         self.last_message[message.author.id] = now
+        # purga barata: 1 de cada ~100 mensajes limpia inactivos (evita leak)
+        if len(self.last_message) > 5000 or random.randint(1, 100) == 1:
+            cutoff = now - max(cooldown * 2, 120)
+            for uid in [uid for uid, ts in self.last_message.items() if ts < cutoff]:
+                del self.last_message[uid]
 
         amount = random.randint(config["message_xp_min"], config["message_xp_max"])
         result = await award_xp(message.guild, message.author, amount)
@@ -234,8 +239,7 @@ class LevelsCog(commands.Cog):
         level, xp_in_level, xp_needed = level_from_xp(data["xp"])
 
         saved_color = await db.get_card_color(interaction.guild_id, target.id)
-        top = await db.get_leaderboard_alltime(interaction.guild_id, limit=1000)
-        position = next((i + 1 for i, row in enumerate(top) if row[0] == target.id), len(top) + 1 if top else 1)
+        position = await db.get_user_rank(interaction.guild_id, target.id)
 
         await interaction.response.defer()
         from utils.card_renderer import render_card
@@ -266,8 +270,7 @@ class LevelsCog(commands.Cog):
         data = await db.get_level_data(interaction.guild_id, target.id)
         level, xp_in_level, xp_needed = level_from_xp(data["xp"])
 
-        top = await db.get_leaderboard_alltime(interaction.guild_id, limit=1000)
-        position = next((i + 1 for i, row in enumerate(top) if row[0] == target.id), len(top) + 1 if top else 1)
+        position = await db.get_user_rank(interaction.guild_id, target.id)
 
         await interaction.response.defer()
         from utils.card_renderer import render_card

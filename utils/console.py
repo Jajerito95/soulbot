@@ -341,8 +341,14 @@ async def _cmd_stats(bot, args):
         cur = await db.db().execute("SELECT COALESCE(SUM(balance),0) FROM economy WHERE guild_id=?", (g.id,))
         total_coins = f"{(await cur.fetchone())[0]:,}".replace(",", ".")
     import discord as _d
+    try:
+        import resource as _res
+        rss_mb = _res.getrusage(_res.RUSAGE_SELF).ru_maxrss // 1024
+        ram = f"{rss_mb}MB"
+    except Exception:
+        ram = "?"
     _out("╭─ 📊 SoulBot Stats ─")
-    _out(f"│ ⏱️ Uptime: {h}h {m}m {s}s  |  📶 {round(bot.latency * 1000)}ms")
+    _out(f"│ ⏱️ Uptime: {h}h {m}m {s}s  |  📶 {round(bot.latency * 1000)}ms  |  🧠 RAM {ram}")
     _out(f"│ 🏠 {g.name if g else f'{len(bot.guilds)} servidores'}  |  👥 {users} usuarios ({bots} bots)")
     _out(f"│ 💬 {text_ch} texto + 🔊 {voice_ch} voz  |  🎭 {len(g.roles) - 1 if g else '?'} roles")
     _out(f"│ 💰 En circulación: {total_coins} SoulCoins  |  🧩 {len(bot.cogs)} cogs")

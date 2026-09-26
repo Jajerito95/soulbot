@@ -10,6 +10,51 @@ import time as _time
 FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "fonts")
 _avatar_cache: dict[str, tuple[bytes, float]] = {}
 _AVATAR_TTL = 300
+_AVATAR_MAX = 64
+
+
+def _vgradient(w: int, h: int, top: tuple, bottom: tuple) -> Image.Image:
+    """Gradiente vertical ~10x más rápido: interpola 1 columna y la estira (C)."""
+    g = Image.new("RGB", (1, h))
+    px = g.load()
+    for y in range(h):
+        t = y / max(1, h - 1)
+        px[0, y] = (
+            round(top[0] + (bottom[0] - top[0]) * t),
+            round(top[1] + (bottom[1] - top[1]) * t),
+            round(top[2] + (bottom[2] - top[2]) * t),
+        )
+    return g.resize((w, h)).convert("RGBA")
+
+
+def _hgradient(w: int, h: int, left: tuple, right: tuple) -> Image.Image:
+    """Gradiente horizontal rápido para barras de progreso."""
+    g = Image.new("RGB", (w, 1))
+    px = g.load()
+    for x in range(w):
+        t = x / max(1, w - 1)
+        px[x, 0] = (
+            round(left[0] + (right[0] - left[0]) * t),
+            round(left[1] + (right[1] - left[1]) * t),
+            round(left[2] + (right[2] - left[2]) * t),
+        )
+    return g.resize((w, h)).convert("RGBA")
+
+
+_fonts: dict[tuple[str, int], object] = {}
+
+
+def _font(path: str, size: int):
+    """Caché de fuentes: truetype desde disco en cada render era carísimo."""
+    key = (path, size)
+    f = _fonts.get(key)
+    if f is None:
+        try:
+            f = _font(path, size)
+        except Exception:
+            f = ImageFont.load_default()
+        _fonts[key] = f
+    return f
 
 
 def _download_sync(url: str) -> bytes:
@@ -23,9 +68,12 @@ def _download_sync(url: str) -> bytes:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = resp.read()
             _avatar_cache[url] = (data, now)
-            if len(_avatar_cache) > 200:
-                oldest = min(_avatar_cache, key=lambda k: _avatar_cache[k][1])
-                _avatar_cache.pop(oldest, None)
+            if len(_avatar_cache) >= _AVATAR_MAX:
+                # expulsa caducados primero, luego los más viejos
+                for k in [k for k, (_, ts) in _avatar_cache.items() if now - ts >= _AVATAR_TTL]:
+                    _avatar_cache.pop(k, None)
+                while len(_avatar_cache) >= _AVATAR_MAX:
+                    _avatar_cache.pop(min(_avatar_cache, key=lambda k: _avatar_cache[k][1]), None)
             return data
     except Exception:
         return b""
@@ -83,14 +131,7 @@ def render_card(
     accent = _hex_to_rgb(accent_hex) if accent_hex else ACCENT_DEFAULT
     accent_light = tuple(min(255, c + 40) for c in accent)
     # base con gradiente sutil vertical
-    base = Image.new("RGBA", (CARD_W, CARD_H), (0,0,0,0))
-    bdraw = ImageDraw.Draw(base)
-    for y in range(CARD_H):
-        t = y / CARD_H
-        r = int(BG_COLOR[0]*(1-t) + (BG_COLOR[0]+12)*t)
-        g = int(BG_COLOR[1]*(1-t) + (BG_COLOR[1]+12)*t)
-        b = int(BG_COLOR[2]*(1-t) + (BG_COLOR[2]+14)*t)
-        bdraw.line([(0,y),(CARD_W,y)], fill=(r,g,b,255))
+    base = _vgradient(CARD_W, CARD_H, BG_COLOR, (BG_COLOR[0]+12, BG_COLOR[1]+12, BG_COLOR[2]+14))
     # diagonal decorativa: gradiente accent -> accent_light + sombra
     overlay = Image.new("RGBA", (CARD_W, CARD_H), (0, 0, 0, 0))
     odraw = ImageDraw.Draw(overlay)
@@ -130,9 +171,9 @@ def render_card(
     # anillo interior acento
     draw.ellipse((50, 68, 196, 214), outline=accent + (180,), width=2)
 
-    font_name = ImageFont.truetype(FONT_BOLD, 40)
-    font_stats = ImageFont.truetype(FONT_REGULAR, 22)
-    font_small = ImageFont.truetype(FONT_REGULAR, 20)
+    font_name = _font(FONT_BOLD, 40)
+    font_stats = _font(FONT_REGULAR, 22)
+    font_small = _font(FONT_REGULAR, 20)
 
     # username truncado para no invadir overlay
     clean_name = _clean(username)[:18]
@@ -150,7 +191,7 @@ def render_card(
     # badge rank top-right (evita overlay también)
     badge_text = f"#{rank}"
     try:
-        font_badge = ImageFont.truetype(FONT_BOLD, 22)
+        font_badge = _font(FONT_BOLD, 22)
     except: font_badge = font_small
     bw = int(draw.textlength(badge_text, font=font_badge)) + 28
     bx = CARD_W - bw - 24
@@ -169,14 +210,7 @@ def render_card(
     fill_w = int(bar_w * ratio)
     if fill_w > 4:
         # fill con gradiente horizontal accent
-        fill_img = Image.new("RGBA", (fill_w, bar_h), (0,0,0,0))
-        fdraw = ImageDraw.Draw(fill_img)
-        for x in range(fill_w):
-            t = x / max(1, fill_w)
-            r = int(accent[0]*(1-t) + accent_light[0]*t)
-            g = int(accent[1]*(1-t) + accent_light[1]*t)
-            b = int(accent[2]*(1-t) + accent_light[2]*t)
-            fdraw.line([(x,0),(x,bar_h)], fill=(r,g,b,255))
+        fill_img = _hgradient(fill_w, bar_h, accent, accent_light)
         # máscara redondeada para fill
         fill_mask = Image.new("L", (fill_w, bar_h), 0)
         ImageDraw.Draw(fill_mask).rounded_rectangle([0,0,fill_w,bar_h], radius=11, fill=255)
@@ -190,7 +224,7 @@ def render_card(
     # porcentaje dentro de la barra
     pct = f"{int(ratio*100)}%"
     try:
-        font_pct = ImageFont.truetype(FONT_BOLD, 14)
+        font_pct = _font(FONT_BOLD, 14)
     except: font_pct = font_small
     # elige color según si está sobre fill o track
     px = bar_x + bar_w//2
@@ -198,7 +232,7 @@ def render_card(
     draw.text((px, bar_y+2), pct, font=font_pct, fill=(255,255,255,255), anchor="mm")
 
     buffer = io.BytesIO()
-    card.convert("RGB").save(buffer, format="PNG")
+    card.convert("RGB").save(buffer, format="PNG", compress_level=1)
     buffer.seek(0)
     return buffer
 
@@ -219,14 +253,7 @@ def render_leaderboard(
     height = header_h + row_h * len(entries) + 40
     # fondo con gradiente sutil
     card = Image.new("RGBA", (width, height), (0,0,0,0))
-    bg = Image.new("RGBA", (width, height), BG_COLOR + (255,))
-    bdraw = ImageDraw.Draw(bg)
-    for y in range(height):
-        t = y/height
-        r = int(BG_COLOR[0]*(1-t) + (BG_COLOR[0]+10)*t)
-        g = int(BG_COLOR[1]*(1-t) + (BG_COLOR[1]+10)*t)
-        b = int(BG_COLOR[2]*(1-t) + (BG_COLOR[2]+12)*t)
-        bdraw.line([(0,y),(width,y)], fill=(r,g,b,255))
+    bg = _vgradient(width, height, BG_COLOR, (BG_COLOR[0]+10, BG_COLOR[1]+10, BG_COLOR[2]+12))
     # diagonal accent
     overlay = Image.new("RGBA", (width, height), (0,0,0,0))
     odraw = ImageDraw.Draw(overlay)
@@ -237,11 +264,11 @@ def render_leaderboard(
     card.paste(bg, (0,0), mask)
     draw = ImageDraw.Draw(card)
 
-    font_title = ImageFont.truetype(FONT_BOLD, 28)
-    font_sub = ImageFont.truetype(FONT_REGULAR, 16)
-    font_rank = ImageFont.truetype(FONT_BOLD, 22)
-    font_user = ImageFont.truetype(FONT_BOLD, 20)
-    font_stat = ImageFont.truetype(FONT_REGULAR, 16)
+    font_title = _font(FONT_BOLD, 28)
+    font_sub = _font(FONT_REGULAR, 16)
+    font_rank = _font(FONT_BOLD, 22)
+    font_user = _font(FONT_BOLD, 20)
+    font_stat = _font(FONT_REGULAR, 16)
 
     # icono guild con sombra
     if guild_icon_url:
@@ -316,12 +343,7 @@ def render_leaderboard(
             draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], radius=5, fill=(45, 48, 54, 255))
             fill_w = int(bar_w * min(1.0, entry["ratio"]))
             if fill_w > 0:
-                fill_img = Image.new("RGBA", (fill_w, bar_h), (0,0,0,0))
-                fd = ImageDraw.Draw(fill_img)
-                for x in range(fill_w):
-                    t = x / max(1, fill_w)
-                    r = int(88*(1-t) + 120*t); g = int(101*(1-t) + 140*t); b = int(242*(1-t) + 255*t)
-                    fd.line([(x,0),(x,bar_h)], fill=(r,g,b,255))
+                fill_img = _hgradient(fill_w, bar_h, (88, 101, 242), (120, 140, 255))
                 fm = Image.new("L", (fill_w, bar_h), 0)
                 ImageDraw.Draw(fm).rounded_rectangle([0,0,fill_w,bar_h], radius=5, fill=255)
                 if fill_w < bar_w:
@@ -334,7 +356,7 @@ def render_leaderboard(
     draw.text((width//2, height-16), "SoulSeeker™ • SoulBot System", font=font_sub, fill=(110,114,120,255), anchor="mm")
 
     buffer = io.BytesIO()
-    card.convert("RGB").save(buffer, format="PNG")
+    card.convert("RGB").save(buffer, format="PNG", compress_level=1)
     buffer.seek(0)
     return buffer
 
@@ -372,13 +394,13 @@ def render_banner(title: str, subtitle: str, guild_icon_url: str | None = None, 
         except Exception:
             pass
 
-    font_title = ImageFont.truetype(FONT_BOLD, 38)
-    font_sub = ImageFont.truetype(FONT_REGULAR, 20)
+    font_title = _font(FONT_BOLD, 38)
+    font_sub = _font(FONT_REGULAR, 20)
     draw.text((text_x, 68), _clean(title), font=font_title, fill=(255, 255, 255, 255))
     draw.text((text_x, 118), subtitle, font=font_sub, fill=(180, 183, 188, 255))
 
     buffer = io.BytesIO()
-    banner.convert("RGB").save(buffer, format="PNG")
+    banner.convert("RGB").save(buffer, format="PNG", compress_level=1)
     buffer.seek(0)
     return buffer
 
@@ -422,9 +444,9 @@ def render_sanction(
     card.paste(avatar_img, (48, 66), avatar_mask)
     draw.ellipse((48, 66, 198, 216), outline=(255, 255, 255, 255), width=4)
 
-    font_name = ImageFont.truetype(FONT_BOLD, 38)
-    font_meta = ImageFont.truetype(FONT_REGULAR, 22)
-    font_reason = ImageFont.truetype(FONT_REGULAR, 22)
+    font_name = _font(FONT_BOLD, 38)
+    font_meta = _font(FONT_REGULAR, 22)
+    font_reason = _font(FONT_REGULAR, 22)
 
     action_label = {"warn": "ADVERTENCIA", "ban": "BAN", "unban": "DESBANEO"}.get(action, str(action).upper())
     draw.text((222, 70), f"@{_clean(username)}", font=font_name, fill=(255, 255, 255, 255))
@@ -451,7 +473,7 @@ def render_sanction(
         y += 30
 
     buffer = io.BytesIO()
-    card.convert("RGB").save(buffer, format="PNG")
+    card.convert("RGB").save(buffer, format="PNG", compress_level=1)
     buffer.seek(0)
     return buffer
 
@@ -473,14 +495,7 @@ def render_welcome(
     CARD_W, CARD_H = 934, 340
 
     # background gradient
-    base = Image.new("RGBA", (CARD_W, CARD_H), (0,0,0,0))
-    bdraw = ImageDraw.Draw(base)
-    for y in range(CARD_H):
-        t = y / CARD_H
-        r = int(BG_COLOR[0]*(1-t) + (BG_COLOR[0]+14)*t)
-        g = int(BG_COLOR[1]*(1-t) + (BG_COLOR[1]+14)*t)
-        b = int(BG_COLOR[2]*(1-t) + (BG_COLOR[2]+16)*t)
-        bdraw.line([(0,y),(CARD_W,y)], fill=(r,g,b,255))
+    base = _vgradient(CARD_W, CARD_H, BG_COLOR, (BG_COLOR[0]+14, BG_COLOR[1]+14, BG_COLOR[2]+16))
 
     # diagonal accent
     overlay = Image.new("RGBA", (CARD_W, CARD_H), (0, 0, 0, 0))
@@ -511,10 +526,10 @@ def render_welcome(
     draw.ellipse((48, 69, 194, 215), outline=accent + (180,), width=2)
 
     try:
-        font_title = ImageFont.truetype(FONT_BOLD, 36)
-        font_name = ImageFont.truetype(FONT_BOLD, 38)
-        font_sub = ImageFont.truetype(FONT_REGULAR, 22)
-        font_small = ImageFont.truetype(FONT_REGULAR, 18)
+        font_title = _font(FONT_BOLD, 36)
+        font_name = _font(FONT_BOLD, 38)
+        font_sub = _font(FONT_REGULAR, 22)
+        font_small = _font(FONT_REGULAR, 18)
     except Exception:
         font_title = font_name = font_sub = font_small = ImageFont.load_default()
 
@@ -538,7 +553,7 @@ def render_welcome(
     draw.text((tx, 255), "SoulSeeker™", font=font_small, fill=(110, 114, 120, 255))
 
     buffer = io.BytesIO()
-    card.convert("RGB").save(buffer, format="PNG")
+    card.convert("RGB").save(buffer, format="PNG", compress_level=1)
     buffer.seek(0)
     return buffer
 
@@ -554,14 +569,7 @@ def render_profile(
     accent_light = tuple(min(255, c + 40) for c in accent)
     CARD_W, CARD_H = 934, 282
 
-    base = Image.new("RGBA", (CARD_W, CARD_H), (0,0,0,0))
-    bdraw = ImageDraw.Draw(base)
-    for y in range(CARD_H):
-        t = y / CARD_H
-        r = int(BG_COLOR[0]*(1-t) + (BG_COLOR[0]+12)*t)
-        g = int(BG_COLOR[1]*(1-t) + (BG_COLOR[1]+12)*t)
-        b = int(BG_COLOR[2]*(1-t) + (BG_COLOR[2]+14)*t)
-        bdraw.line([(0,y),(CARD_W,y)], fill=(r,g,b,255))
+    base = _vgradient(CARD_W, CARD_H, BG_COLOR, (BG_COLOR[0]+12, BG_COLOR[1]+12, BG_COLOR[2]+14))
     # diagonal decorativa — más atrás para no tapar texto
     overlay = Image.new("RGBA", (CARD_W, CARD_H), (0, 0, 0, 0))
     odraw = ImageDraw.Draw(overlay)
@@ -596,10 +604,10 @@ def render_profile(
     draw.ellipse((48, 66, 198, 216), outline=(255, 255, 255, 255), width=4)
     draw.ellipse((50, 68, 196, 214), outline=accent + (180,), width=2)
 
-    font_name = ImageFont.truetype(FONT_BOLD, 40)
-    font_coins = ImageFont.truetype(FONT_BOLD, 48)
-    font_label = ImageFont.truetype(FONT_REGULAR, 22)
-    font_small = ImageFont.truetype(FONT_REGULAR, 20)
+    font_name = _font(FONT_BOLD, 40)
+    font_coins = _font(FONT_BOLD, 48)
+    font_label = _font(FONT_REGULAR, 22)
+    font_small = _font(FONT_REGULAR, 20)
 
     def _f(n): return f"{int(n):,}".replace(",", ".")
 
@@ -615,7 +623,7 @@ def render_profile(
 
     # badge monedita decorativo
     try:
-        font_badge = ImageFont.truetype(FONT_BOLD, 18)
+        font_badge = _font(FONT_BOLD, 18)
     except:
         font_badge = font_small
     bw = 120
@@ -625,7 +633,7 @@ def render_profile(
     draw.text((bx + bw//2, by + 5), "COINS", font=font_badge, fill=accent + (255,), anchor="mt")
 
     buffer = io.BytesIO()
-    card.convert("RGB").save(buffer, format="PNG")
+    card.convert("RGB").save(buffer, format="PNG", compress_level=1)
     buffer.seek(0)
     return buffer
 
@@ -642,14 +650,9 @@ def render_suggestion(
     accent = {"pending": (88,101,242), "approved": (87,242,135), "denied": (237,66,69)}.get(status, (88,101,242))
     BG = (30,33,36)
     W, H = 800, 260
-    base = Image.new("RGBA", (W,H), BG + (255,))
-    bdraw = ImageDraw.Draw(base)
-    for y in range(H):
-        t=y/H
-        r=int(BG[0]*(1-t)+(BG[0]+10)*t); g=int(BG[1]*(1-t)+(BG[1]+10)*t); b=int(BG[2]*(1-t)+(BG[2]+12)*t)
-        bdraw.line([(0,y),(W,y)], fill=(r,g,b,255))
+    base = _vgradient(W, H, BG, (BG[0]+10, BG[1]+10, BG[2]+12))
     # barra lateral acento
-    bdraw.rectangle([0,0,8,H], fill=accent+(255,))
+    ImageDraw.Draw(base).rectangle([0,0,8,H], fill=accent+(255,))
     mask = Image.new("L", (W,H), 0)
     ImageDraw.Draw(mask).rounded_rectangle([0,0,W,H], radius=18, fill=255)
     card = Image.new("RGBA", (W,H), (0,0,0,0))
@@ -663,7 +666,7 @@ def render_suggestion(
     am = Image.new("L", (64,64), 0); ImageDraw.Draw(am).ellipse((0,0,64,64), fill=255)
     card.paste(av, (24,24), am)
     draw.ellipse((24,24,88,88), outline=(255,255,255,40), width=1)
-    font_b = ImageFont.truetype(FONT_BOLD, 20); font_r = ImageFont.truetype(FONT_REGULAR, 16); font_c = ImageFont.truetype(FONT_REGULAR, 18)
+    font_b = _font(FONT_BOLD, 20); font_r = _font(FONT_REGULAR, 16); font_c = _font(FONT_REGULAR, 18)
     draw.text((104, 28), _clean(username)[:20], font=font_b, fill=(255,255,255,255))
     status_lbl = {"pending":"PENDIENTE","approved":"APROBADA","denied":"DENEGADA"}.get(status,status.upper())
     draw.rounded_rectangle([W-110, 24, W-24, 48], radius=10, fill=accent+(255,))
@@ -687,7 +690,7 @@ def render_suggestion(
     # votos
     draw.text((24, H-36), f"🟢 {yes}  •  🔴 {no}", font=font_r, fill=(160,160,165,255))
     draw.text((W-24, H-36), "SoulSeeker™", font=font_r, fill=(110,114,120,255), anchor="rm")
-    buf=io.BytesIO(); card.convert("RGB").save(buf, format="PNG"); buf.seek(0); return buf
+    buf=io.BytesIO(); card.convert("RGB").save(buf, format="PNG", compress_level=1); buf.seek(0); return buf
 
 
 def render_daily_streak(username: str, avatar_url: str, amount: int, streak: int, streak_coins: int, streak_xp: int, balance: int) -> io.BytesIO:
@@ -695,12 +698,7 @@ def render_daily_streak(username: str, avatar_url: str, amount: int, streak: int
     BG = (18, 20, 28)
     accent = (88, 101, 242)
     accent_light = (120, 140, 255)
-    base = Image.new("RGBA", (W, H), BG + (255,))
-    bdraw = ImageDraw.Draw(base)
-    for y in range(H):
-        t = y / H
-        r = int(18 + t*25); g = int(20 + t*15); b = int(28 + t*50)
-        bdraw.line([(0,y),(W,y)], fill=(r,g,b,255))
+    base = _vgradient(W, H, BG, (43, 35, 78))
     # diagonal accent sutil
     overlay = Image.new("RGBA", (W, H), (0,0,0,0))
     odraw = ImageDraw.Draw(overlay)
@@ -719,18 +717,18 @@ def render_daily_streak(username: str, avatar_url: str, amount: int, streak: int
             col = (55,58,63,255)
         ImageDraw.Draw(base).rounded_rectangle([x0,y0,x1,y1], radius=14, fill=col)
         try:
-            f = ImageFont.truetype(FONT_BOLD, 20)
+            f = _font(FONT_BOLD, 20)
         except: f = ImageFont.load_default()
         ImageDraw.Draw(base).text(((x0+x1)//2, (y0+y1)//2), f"{i+1}", font=f, fill=(255,255,255,255), anchor="mm")
         if i+1 == 7:
-            try: sf = ImageFont.truetype(FONT_BOLD, 12)
+            try: sf = _font(FONT_BOLD, 12)
             except: sf = f
             ImageDraw.Draw(base).text(((x0+x1)//2, y1+12), "CAJA GRANDE", font=sf, fill=(255,199,60,255), anchor="mt")
     # check mark en los completados
     for i in range(streak):
         x0 = 24 + i * cell_w
         x1 = x0 + cell_w - 8
-        try: chk = ImageFont.truetype(FONT_BOLD, 14)
+        try: chk = _font(FONT_BOLD, 14)
         except: chk = ImageFont.load_default()
         ImageDraw.Draw(base).text(((x0+x1)//2, y0 - 14), "✓", font=chk, fill=(255,199,60,200), anchor="mm")
 
@@ -752,10 +750,10 @@ def render_daily_streak(username: str, avatar_url: str, amount: int, streak: int
     card.paste(av, (28, 26), am)
     draw.ellipse((28,26,108,106), outline=(255,255,255,40), width=2)
 
-    font_name = ImageFont.truetype(FONT_BOLD, 30)
-    font_reward = ImageFont.truetype(FONT_BOLD, 36)
-    font_sub = ImageFont.truetype(FONT_REGULAR, 18)
-    font_small = ImageFont.truetype(FONT_REGULAR, 15)
+    font_name = _font(FONT_BOLD, 30)
+    font_reward = _font(FONT_BOLD, 36)
+    font_sub = _font(FONT_REGULAR, 18)
+    font_small = _font(FONT_REGULAR, 15)
 
     clean_name = _clean(username)[:20]
     draw.text((126, 32), f"@{clean_name}", font=font_name, fill=(255,255,255,255))
@@ -773,17 +771,13 @@ def render_daily_streak(username: str, avatar_url: str, amount: int, streak: int
         draw.text((W-24, 180), "💎 ¡CAJA GRANDE!", font=font_sub, fill=(255,199,60,255), anchor="rm")
 
     draw.text((W//2, H-14), "SoulSeeker™ • Daily", font=font_small, fill=(110,114,120,255), anchor="mm")
-    buf = io.BytesIO(); card.convert("RGB").save(buf, format="PNG"); buf.seek(0); return buf
+    buf = io.BytesIO(); card.convert("RGB").save(buf, format="PNG", compress_level=1); buf.seek(0); return buf
 
 def render_streaks_overview(username: str, avatar_url: str, streaks: list[dict]) -> io.BytesIO:
     # streaks: list of {type, current, max, label}
     W, H = 700, 260 + len(streaks)*54
     BG = (22, 24, 30)
-    base = Image.new("RGBA", (W, H), BG + (255,))
-    bdraw = ImageDraw.Draw(base)
-    for y in range(H):
-        t=y/H
-        bdraw.line([(0,y),(W,y)], fill=(int(22+t*12), int(24+t*10), int(30+t*20),255))
+    base = _vgradient(W, H, BG, (34, 34, 50))
     mask = Image.new("L", (W,H), 0); ImageDraw.Draw(mask).rounded_rectangle([0,0,W,H], radius=22, fill=255)
     card = Image.new("RGBA", (W,H), (0,0,0,0)); card.paste(base,(0,0),mask)
     draw = ImageDraw.Draw(card)
@@ -793,8 +787,8 @@ def render_streaks_overview(username: str, avatar_url: str, streaks: list[dict])
     except: av = Image.new("RGBA", (64,64), (80,80,80,255))
     am = Image.new("L", (64,64), 0); ImageDraw.Draw(am).ellipse((0,0,64,64), fill=255)
     card.paste(av, (24,24), am)
-    font_b = ImageFont.truetype(FONT_BOLD, 22) if os.path.exists(FONT_BOLD) else ImageFont.load_default()
-    font_r = ImageFont.truetype(FONT_REGULAR, 16) if os.path.exists(FONT_REGULAR) else ImageFont.load_default()
+    font_b = _font(FONT_BOLD, 22) if os.path.exists(FONT_BOLD) else ImageFont.load_default()
+    font_r = _font(FONT_REGULAR, 16) if os.path.exists(FONT_REGULAR) else ImageFont.load_default()
     draw.text((104, 36), _clean(username)[:18], font=font_b, fill=(255,255,255,255))
     draw.text((104, 62), "Rachas", font=font_r, fill=(160,160,165,255))
     y=110
@@ -806,18 +800,14 @@ def render_streaks_overview(username: str, avatar_url: str, streaks: list[dict])
         draw.text((W-24, y+10), f"{cur} días (récord {mx})", font=font_r, fill=(88,101,242,255), anchor="rm")
         y+=54
     draw.text((W//2, H-14), "SoulSeeker™ • Rachas", font=font_r, fill=(110,114,120,255), anchor="mm")
-    buf=io.BytesIO(); card.convert("RGB").save(buf, format="PNG"); buf.seek(0); return buf
+    buf=io.BytesIO(); card.convert("RGB").save(buf, format="PNG", compress_level=1); buf.seek(0); return buf
 
 def render_boss_card(boss_name: str, current_hp: int, max_hp: int, top: list[tuple[str,int]], image_url: str | None = None) -> io.BytesIO:
     W, H = 934, 360
     BG = (20, 16, 16)
     accent = (231, 76, 60)
     accent_light = (255, 120, 100)
-    base = Image.new("RGBA", (W,H), BG+(255,))
-    bdraw = ImageDraw.Draw(base)
-    for y in range(H):
-        t=y/H
-        bdraw.line([(0,y),(W,y)], fill=(int(20+t*30), int(16+t*10), int(16+t*10),255))
+    base = _vgradient(W, H, BG, (50, 26, 26))
     # diagonal accent rojo sutil
     overlay = Image.new("RGBA", (W,H), (0,0,0,0))
     odraw = ImageDraw.Draw(overlay)
@@ -835,10 +825,10 @@ def render_boss_card(boss_name: str, current_hp: int, max_hp: int, top: list[tup
     mask = Image.new("L", (W,H), 0); ImageDraw.Draw(mask).rounded_rectangle([0,0,W,H], radius=28, fill=255)
     card = Image.new("RGBA", (W,H), (0,0,0,0)); card.paste(base,(0,0),mask)
     draw = ImageDraw.Draw(card)
-    font_b = ImageFont.truetype(FONT_BOLD, 34)
-    font_r = ImageFont.truetype(FONT_REGULAR, 20)
-    font_s = ImageFont.truetype(FONT_REGULAR, 16)
-    font_small = ImageFont.truetype(FONT_REGULAR, 14)
+    font_b = _font(FONT_BOLD, 34)
+    font_r = _font(FONT_REGULAR, 20)
+    font_s = _font(FONT_REGULAR, 16)
+    font_small = _font(FONT_REGULAR, 14)
     tx = 340 if image_url else 28
     draw.text((tx, 32), f"👹 {_clean(boss_name)[:22]}", font=font_b, fill=(255,255,255,255))
     # HP bar — thicker
@@ -847,12 +837,7 @@ def render_boss_card(boss_name: str, current_hp: int, max_hp: int, top: list[tup
     ImageDraw.Draw(card).rounded_rectangle([bar_x, bar_y, bar_x+bar_w, bar_y+bar_h], radius=15, fill=(45,40,40,255), outline=(60,40,40,255), width=1)
     fill_w = int(bar_w * pct)
     if fill_w>4:
-        fimg = Image.new("RGBA", (fill_w, bar_h), (0,0,0,0))
-        fd = ImageDraw.Draw(fimg)
-        for x in range(fill_w):
-            t=x/max(1,fill_w)
-            r=int(231*(1-t)+255*t); g=int(76*(1-t)+100*t); b=int(60*(1-t)+60*t)
-            fd.line([(x,0),(x,bar_h)], fill=(r,g,b,255))
+        fimg = _hgradient(fill_w, bar_h, (231, 76, 60), (255, 100, 60))
         fm = Image.new("L", (fill_w, bar_h), 0); ImageDraw.Draw(fm).rounded_rectangle([0,0,fill_w,bar_h], radius=15, fill=255)
         if pct<0.98: ImageDraw.Draw(fm).rectangle([fill_w-15,0,fill_w,bar_h], fill=255)
         card.paste(fimg, (bar_x, bar_y), fm)
@@ -868,7 +853,7 @@ def render_boss_card(boss_name: str, current_hp: int, max_hp: int, top: list[tup
         draw.text((tx+24, y), f"{_clean(name)[:18]} — {dmg:,}", font=font_r, fill=(255,255,255,255) if i==0 else (200,200,200,255))
         y+=30
     draw.text((W//2, H-16), "SoulSeeker™ • Boss Semanal", font=font_small, fill=(110,114,120,255), anchor="mm")
-    buf=io.BytesIO(); card.convert("RGB").save(buf, format="PNG"); buf.seek(0); return buf
+    buf=io.BytesIO(); card.convert("RGB").save(buf, format="PNG", compress_level=1); buf.seek(0); return buf
 
 # Paleta de acentos por categoría (determinista por nombre, sin necesidad de guardar color en DB)
 CATEGORY_PALETTE = [
@@ -911,14 +896,7 @@ def render_missions_card(
     gold = (255, 199, 60)
     green = (87, 242, 135)
 
-    base = Image.new("RGBA", (W, H), BG + (255,))
-    bdraw = ImageDraw.Draw(base)
-    for y in range(H):
-        t = y / H
-        r = int(BG[0] + t * 12)
-        g = int(BG[1] + t * 10)
-        b = int(BG[2] + t * 20)
-        bdraw.line([(0, y), (W, y)], fill=(r, g, b, 255))
+    base = _vgradient(W, H, BG, (BG[0]+12, BG[1]+10, BG[2]+20))
 
     # diagonal accent sutil
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -947,11 +925,11 @@ def render_missions_card(
     draw.ellipse((28, 22, 98, 92), outline=(255, 255, 255, 40), width=2)
 
     try:
-        font_name = ImageFont.truetype(FONT_BOLD, 26)
-        font_title = ImageFont.truetype(FONT_BOLD, 22)
-        font_desc = ImageFont.truetype(FONT_REG, 17)
-        font_small = ImageFont.truetype(FONT_REG, 14)
-        font_status = ImageFont.truetype(FONT_BOLD, 14)
+        font_name = _font(FONT_BOLD, 26)
+        font_title = _font(FONT_BOLD, 22)
+        font_desc = _font(FONT_REG, 17)
+        font_small = _font(FONT_REG, 14)
+        font_status = _font(FONT_BOLD, 14)
     except Exception:
         font_name = font_title = font_desc = font_small = font_status = ImageFont.load_default()
 
@@ -1010,14 +988,8 @@ def render_missions_card(
         fill_w = int(bar_w * ratio)
         if fill_w > 4:
             fill_color = green if is_claimed else (gold if is_done else accent)
-            fill_img = Image.new("RGBA", (fill_w, bar_h), (0, 0, 0, 0))
-            fd = ImageDraw.Draw(fill_img)
-            for x in range(fill_w):
-                t = x / max(1, fill_w)
-                r = int(fill_color[0] * (1 - t) + min(255, fill_color[0] + 40) * t)
-                g = int(fill_color[1] * (1 - t) + min(255, fill_color[1] + 40) * t)
-                b = int(fill_color[2] * (1 - t) + min(255, fill_color[2] + 40) * t)
-                fd.line([(x, 0), (x, bar_h)], fill=(r, g, b, 255))
+            fill_img = _hgradient(fill_w, bar_h, fill_color,
+                                  (min(255, fill_color[0]+40), min(255, fill_color[1]+40), min(255, fill_color[2]+40)))
             fm = Image.new("L", (fill_w, bar_h), 0)
             ImageDraw.Draw(fm).rounded_rectangle([0, 0, fill_w, bar_h], radius=7, fill=255)
             if ratio < 0.98:
@@ -1043,6 +1015,6 @@ def render_missions_card(
     draw.text((W // 2, H - 16), "SoulSeeker™ • Misiones", font=font_small, fill=(110, 114, 120, 255), anchor="mm")
 
     buf = io.BytesIO()
-    card.convert("RGB").save(buf, format="PNG")
+    card.convert("RGB").save(buf, format="PNG", compress_level=1)
     buf.seek(0)
     return buf
