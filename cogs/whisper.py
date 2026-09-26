@@ -15,6 +15,7 @@ class WhisperCog(commands.Cog):
 
     @app_commands.command(name="whisper", description="Envía un mensaje anónimo a alguien (como MC 🤫)")
     @app_commands.describe(usuario="Quién recibe el whisper", mensaje="El mensaje secreto")
+    @app_commands.checks.cooldown(1, 60.0)
     async def whisper(self, interaction: discord.Interaction, usuario: discord.Member, mensaje: str):
         if usuario.id == interaction.user.id:
             await interaction.response.send_message(embed=error_embed("No puedes enviarte un whisper a ti mismo."), ephemeral=True)
@@ -33,15 +34,20 @@ class WhisperCog(commands.Cog):
         )
         embed_recipient.set_footer(text="SoulSeeker™ • Whisper • No se puede responder directamente")
 
-        # DM al destinatario
+        # DM al destinatario (sin menciones: anónimo no puede pingeartodo)
         try:
-            await usuario.send(embed=embed_recipient)
+            await usuario.send(embed=embed_recipient, allowed_mentions=discord.AllowedMentions.none())
             dm_ok = True
         except discord.Forbidden:
             dm_ok = False
 
         # log al canal staff — SOLO el contenido, NO quién envió
         log_channel = self.bot.get_channel(WHISPER_LOG_CHANNEL_ID)
+        if log_channel is None and interaction.guild:
+            try:
+                log_channel = await interaction.guild.fetch_channel(WHISPER_LOG_CHANNEL_ID)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                log_channel = None
         if log_channel:
             log_embed = base_embed(
                 f"**Para:** {usuario.mention}\n"
@@ -50,7 +56,10 @@ class WhisperCog(commands.Cog):
                 COLOR, title="🤫 Whisper (moderación)"
             )
             try:
-                await log_channel.send(embed=log_embed)
+                await log_channel.send(
+                    embed=log_embed,
+                    allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=False),
+                )
             except Exception:
                 pass
 

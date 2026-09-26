@@ -510,6 +510,9 @@ class GiveawaysCog(commands.Cog):
             return
         cols = [d[0] for d in cur.description]
         gw = dict(zip(cols, row))
+        if gw.get("status") == "active":
+            await interaction.response.send_message(embed=error_embed("Ese sorteo sigue activo. Usa /giveaway end primero."), ephemeral=True)
+            return
         cur2 = await db.db().execute("SELECT user_id FROM giveaway_entries WHERE giveaway_id=?", (id,))
         entries = [r[0] for r in await cur2.fetchall()]
         if not entries:

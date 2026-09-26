@@ -122,7 +122,10 @@ class MissionsView(discord.ui.View):
             await db.add_coins(self.guild_id, self.user_id, total_coins, reason=f"mission:{mission_id}")
         if total_xp > 0:
             guild = interaction.guild
-            member = guild.get_member(self.user_id) or await guild.fetch_member(self.user_id)
+            try:
+                member = guild.get_member(self.user_id) or await guild.fetch_member(self.user_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                member = None
             if member:
                 result = await award_xp(guild, member, total_xp, log=True)
                 # boss damage: XP × 5
@@ -144,7 +147,10 @@ class MissionsView(discord.ui.View):
                 b_coins, b_xp, b_rarity = 500, 300, "💎 BONUS 5/5"
                 await db.add_coins(self.guild_id, self.user_id, b_coins, reason="mission_bonus_5")
                 guild = interaction.guild
-                member = guild.get_member(self.user_id) or await guild.fetch_member(self.user_id)
+                try:
+                    member = guild.get_member(self.user_id) or await guild.fetch_member(self.user_id)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    member = None
                 if member:
                     result = await award_xp(guild, member, b_xp, log=True)
                     # boss damage: XP × 5
@@ -253,11 +259,14 @@ class MissionsCog(commands.Cog):
 
     @tasks.loop(minutes=60)
     async def reset_loop(self):
-        # prune old missions >7d
+        # prune old missions >7d + bonus/reroll keys viejos (el user_id en medio rompe la comparación directa)
         try:
             cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
             await db.db().execute("DELETE FROM user_missions WHERE date < ?", (cutoff,))
-            await db.db().execute("DELETE FROM guild_kv WHERE key LIKE 'mission_bonus_%' AND key < ?", (f"mission_bonus_{cutoff}",))
+            cur = await db.db().execute("SELECT key FROM guild_kv WHERE key LIKE 'mission\\_bonus\\_%' ESCAPE '\\' OR key LIKE 'reroll\\_%' ESCAPE '\\'")
+            for (k,) in await cur.fetchall():
+                if k.rsplit("_", 1)[-1] < cutoff:
+                    await db.db().execute("DELETE FROM guild_kv WHERE key=?", (k,))
             await db.db().commit()
         except: pass
 

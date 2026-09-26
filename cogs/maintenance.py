@@ -14,7 +14,19 @@ class MaintenanceCog(commands.Cog):
         self.bot = bot
         self.enabled = False
         self.reason: Optional[str] = None
-        self.bot.tree.interaction_check = self.global_check
+        self._prev_check = self.bot.tree.interaction_check
+        self.bot.tree.interaction_check = self._checked
+
+    def cog_unload(self):
+        self.bot.tree.interaction_check = self._prev_check
+
+    async def _checked(self, interaction: discord.Interaction) -> bool:
+        # autocomplete no admite send_message: dejar pasar siempre
+        if interaction.type == discord.InteractionType.autocomplete:
+            return True
+        if self._prev_check is not None and not await self._prev_check(interaction):
+            return False
+        return await self.global_check(interaction)
 
     async def global_check(self, interaction: discord.Interaction) -> bool:
         if not self.enabled:
@@ -59,6 +71,7 @@ class MaintenanceCog(commands.Cog):
 
         self.enabled = False
         self.reason = None
+        set_maintenance(False)
         await self.bot.change_presence(status=discord.Status.online, activity=discord.Game(name="SoulSeeker™"))
 
         await interaction.response.send_message(embed=success_embed("✅ Modo mantenimiento **desactivado**. Todo vuelve a funcionar con normalidad."), ephemeral=True)

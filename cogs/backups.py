@@ -116,6 +116,11 @@ class BackupsCog(commands.Cog):
             await interaction.followup.send(embed=error_embed("Ese archivo no es un backup válido de SoulBot."))
             return
 
+        meta_gid = (data.get("_meta") or {}).get("guild_id")
+        if meta_gid is not None and int(meta_gid) != interaction.guild_id:
+            await interaction.followup.send(embed=error_embed(f"Ese backup es de otro servidor (ID {meta_gid}), no de este. Nada se ha tocado."))
+            return
+
         await db.import_guild_data(interaction.guild_id, data)
 
         meta = data.get("_meta", {})
@@ -151,6 +156,11 @@ class BackupsCog(commands.Cog):
             await interaction.followup.send(embed=error_embed("Ese archivo no es un snapshot de usuarios (falta levels/economy)."))
             return
 
+        meta_gid = (data.get("_meta") or {}).get("guild_id")
+        if meta_gid is not None and int(meta_gid) != interaction.guild_id:
+            await interaction.followup.send(embed=error_embed(f"Ese snapshot es de otro servidor (ID {meta_gid}), no de este. Nada se ha tocado."))
+            return
+
         await db.import_user_data(interaction.guild_id, data)
         meta = data.get("_meta", {})
         await interaction.followup.send(
@@ -174,8 +184,11 @@ class BackupsCog(commands.Cog):
 
         lines = []
         for f in files[:10]:
-            ts = int(f.split("_")[-1].replace(".json", ""))
-            lines.append(f"🗂️ `{f}` — <t:{ts}:f>")
+            try:
+                ts = int(f.split("_")[-1].replace(".json", ""))
+                lines.append(f"🗂️ `{f}` — <t:{ts}:f>")
+            except (ValueError, IndexError):
+                lines.append(f"🗂️ `{f}`")
 
         embed = base_embed(
             "\n".join(lines) + "\n\n⚠️ Viven en el disco del host (en Orihost persiste entre reinicios). "

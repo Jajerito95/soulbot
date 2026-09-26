@@ -1,5 +1,7 @@
 from __future__ import annotations
 import asyncio
+import string
+from collections import defaultdict
 from typing import Optional
 import discord
 from discord import app_commands
@@ -24,8 +26,17 @@ DEFAULT_FAREWELL = (
 )
 
 
+def _safe_format(template: str, **kwargs) -> str:
+    """Formatea sin romper: llaves desconocidas se dejan tal cual."""
+    try:
+        return string.Formatter().vformat(template, (), defaultdict(str, **kwargs))
+    except Exception:
+        return template
+
+
 def build_welcome_embed(member: discord.Member, template: str) -> discord.Embed:
-    text = template.format(
+    text = _safe_format(
+        template,
         mention=member.mention,
         user=member.display_name,
         member_count=member.guild.member_count,
@@ -43,7 +54,8 @@ def build_welcome_embed(member: discord.Member, template: str) -> discord.Embed:
 
 def build_farewell_embed(member: discord.Member, template: str) -> discord.Embed:
     # Usa display_name directo para que no quede "Usuario-Desconocido" si el @ caduca
-    text = template.format(
+    text = _safe_format(
+        template,
         mention=f"@{member.display_name}",
         user=member.display_name,
         member_count=member.guild.member_count,
@@ -81,6 +93,10 @@ class WelcomeCog(commands.Cog):
         await self.cache_guild_invites(guild)
 
     @commands.Cog.listener()
+    async def on_guild_remove(self, guild: discord.Guild):
+        self.invite_cache.pop(guild.id, None)
+
+    @commands.Cog.listener()
     async def on_invite_create(self, invite: discord.Invite):
         self.invite_cache.setdefault(invite.guild.id, {})[invite.code] = invite.uses or 0
 
@@ -106,6 +122,11 @@ class WelcomeCog(commands.Cog):
                 """INSERT INTO invites (guild_id, user_id, invited_count) VALUES (?, ?, 1)
                    ON CONFLICT(guild_id, user_id) DO UPDATE SET invited_count = invited_count + 1""",
                 (guild.id, inviter_id),
+            )
+            await db().execute(
+                """INSERT INTO invite_joins (guild_id, member_id, inviter_id) VALUES (?, ?, ?)
+                   ON CONFLICT(guild_id, member_id) DO UPDATE SET inviter_id = ?""",
+                (guild.id, member.id, inviter_id, inviter_id),
             )
             await db().commit()
 
@@ -140,20 +161,21 @@ class WelcomeCog(commands.Cog):
     async def on_member_remove(self, member: discord.Member):
         # Despedida — usa nombre directo, no solo @ para evitar Usuario-Desconocido
         config = await get_guild_config(member.guild.id)
-        # actualiza contador de invites (left)
+        # actualiza contador de invites (left) vía quién lo invitó al entrar
         try:
-            new_inv = await member.guild.invites()
-            old = self.invite_cache.get(member.guild.id, {})
-            inviter_id = None
-            for inv in new_inv:
-                if (inv.uses or 0) < old.get(inv.code, 0):
-                    inviter_id = inv.inviter.id if inv.inviter else None
-                    break
-            self.invite_cache[member.guild.id] = {inv.code: inv.uses or 0 for inv in new_inv}
-            if inviter_id:
+            cur = await db().execute(
+                "SELECT inviter_id FROM invite_joins WHERE guild_id = ? AND member_id = ?",
+                (member.guild.id, member.id),
+            )
+            row = await cur.fetchone()
+            if row:
                 await db().execute(
                     "UPDATE invites SET left_count = left_count + 1 WHERE guild_id = ? AND user_id = ?",
-                    (member.guild.id, inviter_id),
+                    (member.guild.id, row[0]),
+                )
+                await db().execute(
+                    "DELETE FROM invite_joins WHERE guild_id = ? AND member_id = ?",
+                    (member.guild.id, member.id),
                 )
                 await db().commit()
         except Exception:

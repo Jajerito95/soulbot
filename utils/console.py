@@ -149,8 +149,8 @@ async def _cmd_user(bot, args):
     if not args:
         _out("Uso: user <nombre o nick>")
         return
-    g, _ = _strip_guild(bot, [])
-    q = " ".join(args).lower()
+    g, rest = _strip_guild(bot, list(args))
+    q = " ".join(rest).lower()
     found = [m for m in g.members
              if q in m.name.lower() or q in (m.nick or "").lower() or q in str(m).lower()]
     if not found:
@@ -229,7 +229,7 @@ async def _cmd_ban(bot, args):
 
 
 async def _cmd_unban(bot, args):
-    toks = args[0].split() if args else []
+    toks = " ".join(args).split() if args else []
     g, rest = _strip_guild(bot, toks)
     if len(rest) != 1:
         _out("Uso: unban <usuario_id>")
@@ -303,7 +303,7 @@ async def _cmd_purge(bot, args):
 # ---------------- economía ----------------
 
 async def _cmd_coins(bot, args):
-    toks = args[0].split() if args else []
+    toks = " ".join(args).split() if args else []
     g, rest = _strip_guild(bot, toks)
     if len(rest) != 1:
         _out("Uso: coins <usuario_id>")
@@ -314,7 +314,7 @@ async def _cmd_coins(bot, args):
 
 
 async def _cmd_addcoins(bot, args):
-    toks = args[0].split() if args else []
+    toks = " ".join(args).split() if args else []
     g, rest = _strip_guild(bot, toks)
     if len(rest) != 2:
         _out("Uso: addcoins <usuario_id> <cantidad>")
@@ -395,8 +395,10 @@ async def _cmd_snapshot(bot, args):
         _out("Varios servidores: no soportado desde consola.")
         return
     data = await db.export_user_data(g.id)
-    users = len(data.get("levels", []))
+    users = len({r.get("user_id") for t in ("levels", "economy") for r in data.get(t, []) if r.get("user_id") is not None})
     ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+    data["_meta"] = {"kind": "manual_users", "guild_id": g.id, "guild_name": g.name,
+                     "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
     path = _os.path.join(_DATA, "backups", f"manual_users_{g.id}_{ts}.json")
     _os.makedirs(_os.path.dirname(path), exist_ok=True)
 
@@ -405,6 +407,16 @@ async def _cmd_snapshot(bot, args):
             _json.dump(data, f, ensure_ascii=False)
 
     await asyncio.to_thread(_write)
+
+    def _prune():
+        files = sorted(f for f in _os.listdir(_os.path.join(_DATA, "backups")) if f.startswith(f"manual_users_{g.id}_"))
+        for old in files[:-5]:
+            try:
+                _os.remove(_os.path.join(_DATA, "backups", old))
+            except Exception:
+                pass
+
+    await asyncio.to_thread(_prune)
     _out(f"✅ Snapshot guardado: {users} usuarios → {path}")
 
 

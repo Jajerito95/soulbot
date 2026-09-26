@@ -25,11 +25,32 @@ def requires_evidence(punishment: str) -> bool:
 
 
 async def _send_log(guild: discord.Guild, title: str, description: str):
-    config = await db.get_guild_config(guild.id)
-    if config["logs_channel_id"] and config["logs_moderation"]:
-        channel = guild.get_channel(config["logs_channel_id"])
-        if channel:
-            await channel.send(embed=log_embed(title, description, color=COLOR_ERROR))
+    try:
+        config = await db.get_guild_config(guild.id)
+        if config["logs_channel_id"] and config["logs_moderation"]:
+            channel = guild.get_channel(config["logs_channel_id"])
+            if channel:
+                await channel.send(embed=log_embed(title, description, color=COLOR_ERROR))
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+        pass
+
+
+async def _make_return_invite(guild: discord.Guild, member: discord.Member, max_age: int) -> str | None:
+    """Crea invite temporal desde un canal con permisos (Guild.create_invite no existe)."""
+    try:
+        me = guild.me
+        channel = guild.system_channel
+        if channel is None or not channel.permissions_for(me).create_instant_invite:
+            channel = next(
+                (c for c in guild.text_channels if c.permissions_for(me).create_instant_invite),
+                None,
+            )
+        if channel is None:
+            return None
+        invite = await channel.create_invite(max_age=max_age, max_uses=1, reason=f"Invite post-sanción para {member.id}")
+        return invite.url
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+        return None
 
 
 async def apply_sanction(
@@ -58,32 +79,26 @@ async def apply_sanction(
         if infraction_key == "nick_ofensivo":
             try:
                 await member.edit(nick=None, reason="Nick ofensivo - reseteo automático")
-            except discord.Forbidden:
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
                 pass
     elif punishment == "perm":
         # "perm" ahora es ban 1 día + invite temporal
         action = "ban"
-        await guild.ban(member, reason=full_reason)
-        await db.add_temp_ban(guild.id, member.id, 1)
-        # crear invite temporal
-        invite_url = None
         try:
-            invite = await guild.create_invite(max_age=86400, max_uses=1, reason=f"Invite post-sanción para {member.id}")
-            invite_url = invite.url
-        except discord.Forbidden:
+            await guild.ban(member, reason=full_reason)
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
             pass
+        await db.add_temp_ban(guild.id, member.id, 1)
+        invite_url = await _make_return_invite(guild, member, 86400)
     else:
         days = int(punishment[:-1])
         action = "ban"
-        await guild.ban(member, reason=full_reason)
-        await db.add_temp_ban(guild.id, member.id, days)
-        # invite temporal para que pueda volver cuando expire
-        invite_url = None
         try:
-            invite = await guild.create_invite(max_age=86400 * (days + 1), max_uses=1, reason=f"Invite post-sanción para {member.id}")
-            invite_url = invite.url
-        except discord.Forbidden:
+            await guild.ban(member, reason=full_reason)
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
             pass
+        await db.add_temp_ban(guild.id, member.id, days)
+        invite_url = await _make_return_invite(guild, member, 86400 * (days + 1))
 
     sanction_id = await db.log_staff_action(guild.id, member.id, staff_id, action, full_reason, evidence_url, infraction_key)
 
@@ -101,7 +116,7 @@ async def apply_sanction(
             ),
             view=AppealPromptView(guild.id, sanction_id),
         )
-    except discord.Forbidden:
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException):
         pass
 
     desc = (

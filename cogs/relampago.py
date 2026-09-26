@@ -290,12 +290,15 @@ class RelampagoCog(commands.Cog):
             try:
                 await channel.send(embed=embed, view=view)
             except: pass
-        # auto-expire view after 5m
-        await asyncio.sleep(300)
-        try:
-            await db.db().execute("UPDATE relampago_events SET status='ended' WHERE id=? AND status='active'", (eid,))
-            await db.db().commit()
-        except: pass
+        # auto-expire event after 5m (en background: no bloquea el loop ni el comando)
+        async def _expire_later(event_id: int):
+            await asyncio.sleep(300)
+            try:
+                await db.db().execute("UPDATE relampago_events SET status='ended' WHERE id=? AND status='active'", (event_id,))
+                await db.db().commit()
+            except Exception:
+                pass
+        asyncio.create_task(_expire_later(eid))
 
     relampago = app_commands.Group(name="relampago", description="Relámpagos 1-4h (Staff config)", default_permissions=discord.Permissions(manage_guild=True))
 

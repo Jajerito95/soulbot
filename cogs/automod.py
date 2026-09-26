@@ -111,7 +111,10 @@ class AutoModCog(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
-        if message.author.guild_permissions.moderate_members:
+        if message.webhook_id is not None:
+            return
+        perms = getattr(message.author, "guild_permissions", None)
+        if perms is not None and perms.moderate_members:
             return
 
         now = time.time()

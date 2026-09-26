@@ -73,24 +73,24 @@ async def on_app_command_error(interaction: discord.Interaction, error):
         log.warning(f"Permisos insuficientes en {interaction.command}: {orig}")
         try:
             if not interaction.response.is_done():
-                await interaction.response.send_message(embed=_err_embed("Sin permisos", "No tengo permisos para hacer eso. Revisa mis permisos y jerarquía."), ephemeral=True)
+                await interaction.response.send_message(embed=_err_embed("No tengo permisos para hacer eso. Revisa mis permisos y jerarquía.", "Sin permisos"), ephemeral=True)
             else:
-                await interaction.followup.send(embed=_err_embed("Sin permisos", "No tengo permisos para hacer eso."), ephemeral=True)
+                await interaction.followup.send(embed=_err_embed("No tengo permisos para hacer eso.", "Sin permisos"), ephemeral=True)
         except Exception:
             pass
         return
     if isinstance(orig, app_commands.CheckFailure):
         try:
             if not interaction.response.is_done():
-                await interaction.response.send_message(embed=_err_embed("No autorizado", "No tienes permisos para usar este comando."), ephemeral=True)
+                await interaction.response.send_message(embed=_err_embed("No tienes permisos para usar este comando.", "No autorizado"), ephemeral=True)
             else:
-                await interaction.followup.send(embed=_err_embed("No autorizado", "No tienes permisos."), ephemeral=True)
+                await interaction.followup.send(embed=_err_embed("No tienes permisos.", "No autorizado"), ephemeral=True)
         except Exception:
             pass
         return
     if isinstance(orig, app_commands.CommandOnCooldown):
         try:
-            await interaction.response.send_message(embed=_err_embed("Cooldown", f"Espera {orig.retry_after:.1f}s antes de reutilizar."), ephemeral=True)
+            await interaction.response.send_message(embed=_err_embed(f"Espera {orig.retry_after:.1f}s antes de reutilizar.", "Cooldown"), ephemeral=True)
         except Exception:
             pass
         return
@@ -100,9 +100,9 @@ async def on_app_command_error(interaction: discord.Interaction, error):
     try:
         msg = f"```{str(orig)[:400]}```" if orig else f"```{str(error)[:400]}```"
         if not interaction.response.is_done():
-            await interaction.response.send_message(embed=_err_embed("Error interno", f"Ocurrió un error inesperado.\n{msg}"), ephemeral=True)
+            await interaction.response.send_message(embed=_err_embed(f"Ocurrió un error inesperado.\n{msg}", "Error interno"), ephemeral=True)
         else:
-            await interaction.followup.send(embed=_err_embed("Error interno", f"Ocurrió un error.\n{msg}"), ephemeral=True)
+            await interaction.followup.send(embed=_err_embed(f"Ocurrió un error.\n{msg}", "Error interno"), ephemeral=True)
     except Exception:
         pass
 

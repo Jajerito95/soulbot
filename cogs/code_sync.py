@@ -407,6 +407,9 @@ class CodeSyncCog(commands.Cog):
             await interaction.followup.send(embed=error_embed("Nombre de Minecraft inválido", f"`{raw_name[:20]}` no parece un nick válido. Contacta staff."))
             return
         mc_roles_list = await asyncio.to_thread(mc_roles, mcname)
+        if interaction.guild is None:
+            await interaction.followup.send(embed=error_embed("Error", "Usa /code dentro del servidor para sincronizar roles."))
+            return
         member = interaction.user
         dc_role_ids = {str(r.id) for r in member.roles}
 
@@ -474,3 +477,4 @@ async def setup(bot: commands.Bot):
     if POSTGRES_URL:
         await asyncio.to_thread(migrate_role_column)
     await bot.add_cog(CodeSyncCog(bot))
+

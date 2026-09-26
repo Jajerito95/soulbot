@@ -113,8 +113,12 @@ class AppealReviewView(discord.ui.View):
             return
 
         # El ID de la apelación va en el título del embed original: "📮 Apelación #N"
-        title = interaction.message.embeds[0].title
-        appeal_id = int(title.split("#")[1])
+        try:
+            title = interaction.message.embeds[0].title or ""
+            appeal_id = int(title.split("#")[1].split()[0].strip("`"))
+        except (IndexError, ValueError, AttributeError):
+            await interaction.response.send_message(embed=error_embed("No pude leer el ID de la apelación de este mensaje."), ephemeral=True)
+            return
         appeal = await db.get_appeal(appeal_id)
 
         if not appeal or appeal["status"] != "pending":

@@ -44,6 +44,13 @@ async def init_db():
             PRIMARY KEY (guild_id, user_id)
         );
 
+        CREATE TABLE IF NOT EXISTS invite_joins (
+            guild_id INTEGER,
+            member_id INTEGER,
+            inviter_id INTEGER,
+            PRIMARY KEY (guild_id, member_id)
+        );
+
         CREATE TABLE IF NOT EXISTS suggestions (
             message_id INTEGER PRIMARY KEY,
             guild_id INTEGER,
@@ -462,6 +469,13 @@ async def get_guild_config(guild_id: int) -> dict:
 
 async def update_guild_config(guild_id: int, **fields):
     await get_guild_config(guild_id)
+    try:
+        allowed = {row[1] for row in await (await _db.execute("PRAGMA table_info(guild_config)")).fetchall()}
+        fields = {k: v for k, v in fields.items() if k in allowed}
+    except Exception:
+        pass
+    if not fields:
+        return
     set_clause = ", ".join(f"{k} = ?" for k in fields)
     values = list(fields.values()) + [guild_id]
     await _db.execute(f"UPDATE guild_config SET {set_clause} WHERE guild_id = ?", values)
@@ -519,7 +533,7 @@ async def delete_staff_action(sanction_id: int):
 async def get_user_sanctions(guild_id: int, user_id: int) -> list[dict]:
     cur = await _db.execute(
         """SELECT id, staff_id, action, reason, evidence_url, created_at FROM staff_actions
-           WHERE guild_id = ? AND target_id = ? AND action IN ('warn', 'ban', 'unban')
+            WHERE guild_id = ? AND target_id = ? AND action IN ('warn', 'ban', 'unban', 'mute', 'kick', 'timeout')
            ORDER BY created_at DESC""",
         (guild_id, user_id),
     )
@@ -1068,7 +1082,7 @@ async def export_guild_data(guild_id: int) -> dict:
     rewards_cur = await _db.execute("SELECT level, role_id FROM level_rewards WHERE guild_id = ?", (guild_id,))
     rewards = await rewards_cur.fetchall()
     shop_cur = await _db.execute(
-        "SELECT name, price, type, role_id, boost_multiplier, boost_minutes FROM shop_items WHERE guild_id = ?",
+        "SELECT name, price, type, role_id, boost_multiplier, boost_minutes, xp_amount, temprole_seconds FROM shop_items WHERE guild_id = ?",
         (guild_id,),
     )
     shop = await shop_cur.fetchall()
@@ -1077,7 +1091,8 @@ async def export_guild_data(guild_id: int) -> dict:
         "guild_config": dict(config),
         "level_rewards": [{"level": r[0], "role_id": r[1]} for r in rewards],
         "shop_items": [
-            {"name": s[0], "price": s[1], "type": s[2], "role_id": s[3], "boost_multiplier": s[4], "boost_minutes": s[5]}
+            {"name": s[0], "price": s[1], "type": s[2], "role_id": s[3], "boost_multiplier": s[4], "boost_minutes": s[5],
+             "xp_amount": s[6], "temprole_seconds": s[7]}
             for s in shop
         ],
     }
@@ -1096,6 +1111,7 @@ async def import_guild_data(guild_id: int, data: dict):
         await add_shop_item(
             guild_id, item["name"], item["price"], item["type"],
             role_id=item.get("role_id"), boost_multiplier=item.get("boost_multiplier"), boost_minutes=item.get("boost_minutes"),
+            xp_amount=item.get("xp_amount"), temprole_seconds=item.get("temprole_seconds"),
         )
 
 
@@ -1122,12 +1138,12 @@ async def export_user_data(guild_id: int) -> dict:
 async def import_user_data(guild_id: int, data: dict):
     """Restaura un snapshot de export_user_data. BORRA los datos actuales del servidor."""
     for table in USER_SNAPSHOT_TABLES:
-        rows = data.get(table)
-        if not rows:
-            continue
+        rows = data.get(table) or []
         await _db.execute(f"DELETE FROM {table} WHERE guild_id = ?", (guild_id,))
         for row in rows:
             row = {k: v for k, v in dict(row).items() if k != "guild_id"}
+            if not row:
+                continue
             cols = ", ".join(["guild_id"] + list(row.keys()))
             placeholders = ", ".join(["?"] * (len(row) + 1))
             await _db.execute(

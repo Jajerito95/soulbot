@@ -7,7 +7,13 @@ import discord
 from config import DATA_DIR
 
 TRANSCRIPTS_DIR = os.path.join(DATA_DIR, "transcripts")
-os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
+
+
+def _ensure_dir():
+    os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
+
+
+_ensure_dir()
 
 TEMPLATE = """<!DOCTYPE html>
 <html lang="es">
@@ -49,25 +55,35 @@ MSG_TEMPLATE = """<div class="msg">
 async def generate_transcript(channel: discord.TextChannel) -> str:
     """Genera el HTML del transcript y devuelve la ruta del archivo guardado."""
     messages_html = []
-    async for msg in channel.history(limit=1000, oldest_first=True):
-        content = html.escape(msg.content or "*(sin contenido de texto)*")
-        attachments = ""
-        for att in msg.attachments:
-            attachments += f'<br><a class="attachment" href="{att.url}">📎 {html.escape(att.filename)}</a>'
+    truncated = False
+    try:
+        async for msg in channel.history(limit=2000, oldest_first=True):
+            content = html.escape(msg.content or "*(sin contenido de texto)*")
+            attachments = ""
+            for att in msg.attachments:
+                attachments += f'<br><a class="attachment" href="{att.url}">📎 {html.escape(att.filename)}</a>'
 
-        messages_html.append(
-            MSG_TEMPLATE.format(
-                avatar=msg.author.display_avatar.url,
-                author=html.escape(msg.author.display_name),
-                time=msg.created_at.strftime("%d/%m/%Y %H:%M"),
-                content=content,
-                attachments=attachments,
+            messages_html.append(
+                MSG_TEMPLATE.format(
+                    avatar=msg.author.display_avatar.url,
+                    author=html.escape(msg.author.display_name),
+                    time=msg.created_at.strftime("%d/%m/%Y %H:%M"),
+                    content=content,
+                    attachments=attachments,
+                )
             )
-        )
+    except (discord.Forbidden, discord.HTTPException):
+        messages_html.append('<div class="msg"><div><span class="author">SoulBot</span><div class="content">⚠️ Sin permiso para leer el historial completo.</div></div></div>')
+        truncated = True
 
-    full_html = TEMPLATE.format(channel_name=html.escape(channel.name), messages="\n".join(messages_html))
+    if len(messages_html) >= 2000:
+        truncated = True
+    note = "<hr><div class='subheader'>⚠️ Mostrando los primeros 2000 mensajes.</div>" if truncated else ""
+    full_html = TEMPLATE.format(channel_name=html.escape(channel.name), messages="\n".join(messages_html) + note)
 
-    path = os.path.join(TRANSCRIPTS_DIR, f"{channel.id}.html")
+    ts = int(discord.utils.utcnow().timestamp())
+    path = os.path.join(TRANSCRIPTS_DIR, f"{channel.id}_{ts}.html")
+
     def _write():
         with open(path, "w", encoding="utf-8") as f:
             f.write(full_html)

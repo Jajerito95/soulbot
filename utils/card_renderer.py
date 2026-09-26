@@ -50,7 +50,7 @@ def _font(path: str, size: int):
     f = _fonts.get(key)
     if f is None:
         try:
-            f = _font(path, size)
+            f = ImageFont.truetype(path, size)
         except Exception:
             f = ImageFont.load_default()
         _fonts[key] = f
@@ -104,8 +104,13 @@ FILL_COLOR = (88, 101, 242)       # azul SoulSeeker (Blurple)
 
 
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
-    h = hex_color.strip().lstrip("#")
-    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    h = (hex_color or "").strip().lstrip("#")
+    if len(h) != 6:
+        return ACCENT_DEFAULT
+    try:
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return ACCENT_DEFAULT
 
 
 def _safe_avatar_sync(url: str) -> Image.Image:

@@ -7,7 +7,10 @@ from config import PORT, DATA_DIR
 
 app = Flask(__name__)
 TRANSCRIPTS_DIR = os.path.join(DATA_DIR, "transcripts")
-os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
+
+
+def _ensure_dirs():
+    os.makedirs(TRANSCRIPTS_DIR, exist_ok=True)
 
 
 @app.route("/")
@@ -23,8 +26,10 @@ def transcript(filename):
 
 
 def run():
-    app.run(host="0.0.0.0", port=PORT)
+    _ensure_dirs()
+    app.run(host="0.0.0.0", port=PORT, use_reloader=False)
 
 
 def keep_alive():
+    _ensure_dirs()
     Thread(target=run, daemon=True).start()

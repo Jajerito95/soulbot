@@ -466,6 +466,9 @@ class LevelsCog(commands.Cog):
     @levels_group.command(name="resetserver", description="⚠️ Resetea TODOS los niveles del servidor (requiere contraseña)")
     @app_commands.describe(contraseña="Contraseña de confirmación")
     async def resetserver(self, interaction: discord.Interaction, contraseña: str):
+        if not RESET_PASSWORD:
+            await interaction.response.send_message(embed=error_embed("RESET_PASSWORD no configurado en el host. Reset bloqueado por seguridad."), ephemeral=True)
+            return
         if contraseña != RESET_PASSWORD:
             await interaction.response.send_message(embed=error_embed("Contraseña incorrecta. Reset cancelado."), ephemeral=True)
             return

@@ -110,6 +110,11 @@ class TicTacToeView(discord.ui.View):
         for child in self.children:
             child.disabled = True
         self.stop()
+        try:
+            if getattr(self, "message", None):
+                await self.message.edit(view=self)
+        except Exception:
+            pass
 
 
 # ==================== 4 EN RAYA (Connect 4) ====================
@@ -217,6 +222,11 @@ class ConnectFourView(discord.ui.View):
         for child in self.children:
             child.disabled = True
         self.stop()
+        try:
+            if getattr(self, "message", None):
+                await self.message.edit(view=self)
+        except Exception:
+            pass
 
 
 # ==================== PIEDRA, PAPEL O TIJERA ====================
@@ -282,6 +292,11 @@ class RPSView(discord.ui.View):
         for child in self.children:
             child.disabled = True
         self.stop()
+        try:
+            if getattr(self, "message", None):
+                await self.message.edit(view=self)
+        except Exception:
+            pass
 
 
 # ==================== COG ====================
@@ -301,6 +316,7 @@ class BoardGamesCog(commands.Cog):
         view = TicTacToeView(interaction.user, oponente)
         embed = base_embed(f"❌ {interaction.user.mention}  vs  ⭕ {oponente.mention}\n\nTurno de: {interaction.user.mention}", COLOR, title="🎲 3 en raya")
         await interaction.response.send_message(embed=embed, view=view)
+        view.message = await interaction.original_response()
 
     @app_commands.command(name="connect4", description="Reta a alguien a 4 en raya (sin apuesta)")
     @app_commands.describe(oponente="A quién retas")
@@ -316,6 +332,7 @@ class BoardGamesCog(commands.Cog):
             COLOR, title="🔴🟡 4 en raya",
         )
         await interaction.response.send_message(embed=embed, view=view)
+        view.message = await interaction.original_response()
 
     @app_commands.command(name="rps", description="Reta a alguien a piedra, papel o tijera (sin apuesta)")
     @app_commands.describe(oponente="A quién retas")
@@ -331,6 +348,7 @@ class BoardGamesCog(commands.Cog):
             COLOR, title="✊ Piedra, papel o tijera",
         )
         await interaction.response.send_message(embed=embed, view=view)
+        view.message = await interaction.original_response()
 
 
 async def setup(bot: commands.Bot):

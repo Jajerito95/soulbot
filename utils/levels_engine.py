@@ -54,7 +54,12 @@ def is_weekend_bonus_now() -> bool:
 def _not_expired(expires_at: str | None) -> bool:
     if not expires_at:
         return True
-    return datetime.datetime.utcnow().isoformat() < expires_at
+    try:
+        exp = datetime.datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        now = datetime.datetime.now(exp.tzinfo) if exp.tzinfo else datetime.datetime.utcnow()
+        return now < exp
+    except ValueError:
+        return True
 
 
 async def get_effective_multiplier(guild_id: int, user_id: int) -> float:

@@ -38,6 +38,7 @@ async def damage_boss(guild_id: int, xp_amount: int) -> dict | None:
     dmg = xp_amount * BOSS_DAMAGE_MULTIPLIER
     new_hp = max(0, int(boss["current_hp"]) - dmg)
     await db.db().execute("UPDATE boss_current SET current_hp=? WHERE id=?", (new_hp, boss["id"]))
+    await db.db().commit()
     # acumular daño por usuario (se pasará user_id desde el caller)
     return {"boss": boss, "damage": dmg, "new_hp": new_hp}
 
@@ -409,8 +410,17 @@ class BossCog(commands.Cog):
         guild = self.bot.get_guild(guild_id)
         if not guild:
             return
-        channel = guild.get_channel(BOSS_CHANNEL_ID)
-        if not channel:
+        channel = None
+        try:
+            cur = await db.db().execute("SELECT channel_id FROM boss_config WHERE guild_id=?", (guild_id,))
+            row = await cur.fetchone()
+            if row:
+                channel = guild.get_channel(int(row[0]))
+        except Exception:
+            pass
+        if channel is None:
+            channel = guild.get_channel(BOSS_CHANNEL_ID)
+        if not isinstance(channel, discord.TextChannel):
             return
         # top 3
         cur = await db.db().execute("SELECT user_id, damage FROM boss_damage WHERE event_id=? ORDER BY damage DESC LIMIT 3", (boss["id"],))

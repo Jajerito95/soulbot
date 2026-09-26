@@ -76,9 +76,7 @@ class FisherView(discord.ui.View):
         self.correct = random.randint(0, 2)
         for i in range(3):
             is_correct = i == self.correct
-            label = "🐟" if is_correct else "🌊"
-            style = discord.ButtonStyle.success if is_correct else discord.ButtonStyle.secondary
-            btn = discord.ui.Button(label=label, style=style, custom_id=f"fish_{i}")
+            btn = discord.ui.Button(label="🌊", style=discord.ButtonStyle.secondary, custom_id=f"fish_{i}")
             async def _cb(interaction: discord.Interaction, is_c=is_correct, b=btn):
                 if interaction.user.id != self.author_id:
                     await interaction.response.send_message(embed=error_embed("Solo tú puedes pescar."), ephemeral=True)
@@ -356,12 +354,12 @@ class EconomyCog(commands.Cog):
     async def works_minero(self, interaction: discord.Interaction):
         # reutiliza la misma lógica que /work minero
         fake_choice = type("C", (), {"value": "minero"})()
-        await self.work(interaction, fake_choice)  # type: ignore
+        await self.work.callback(self, interaction, fake_choice)  # type: ignore
 
     @works_group.command(name="pescador", description="Atajo directo a /work pescador")
     async def works_pescador(self, interaction: discord.Interaction):
         fake_choice = type("C", (), {"value": "pescador"})()
-        await self.work(interaction, fake_choice)  # type: ignore
+        await self.work.callback(self, interaction, fake_choice)  # type: ignore
 
     @app_commands.command(name="pay", description="Transfiere SoulCoins a otro usuario")
     @app_commands.describe(usuario="Usuario que recibe las coins", cantidad="Cantidad a transferir")
@@ -443,8 +441,12 @@ class EconomyCog(commands.Cog):
             if role in interaction.user.roles:
                 await interaction.response.send_message(embed=error_embed("Ya tienes ese rol."), ephemeral=True)
                 return
+            try:
+                await interaction.user.add_roles(role, reason="Compra en la tienda de SoulCoins")
+            except (discord.Forbidden, discord.HTTPException):
+                await interaction.response.send_message(embed=error_embed("No pude asignarte el rol. No se te cobró nada. Avisa al Staff."), ephemeral=True)
+                return
             await db.add_coins(interaction.guild_id, interaction.user.id, -item["price"])
-            await interaction.user.add_roles(role, reason="Compra en la tienda de SoulCoins")
             await interaction.response.send_message(embed=success_embed(f"🎉 Compraste **{item['name']}** — {role.mention} añadido."))
 
         elif item["type"] == "temprole":
@@ -452,13 +454,13 @@ class EconomyCog(commands.Cog):
             if not role:
                 await interaction.response.send_message(embed=error_embed("El rol de este artículo ya no existe. Avisa al Staff."), ephemeral=True)
                 return
-            await db.add_coins(interaction.guild_id, interaction.user.id, -item["price"])
             expires = (datetime.datetime.utcnow() + datetime.timedelta(seconds=item["temprole_seconds"])).isoformat()
             try:
                 await interaction.user.add_roles(role, reason="Compra en la tienda de SoulCoins (rol temporal)")
-            except discord.Forbidden:
-                await interaction.response.send_message(embed=error_embed("No pude asignarte el rol. Avisa al Staff."), ephemeral=True)
+            except (discord.Forbidden, discord.HTTPException):
+                await interaction.response.send_message(embed=error_embed("No pude asignarte el rol. No se te cobró nada. Avisa al Staff."), ephemeral=True)
                 return
+            await db.add_coins(interaction.guild_id, interaction.user.id, -item["price"])
             await db.add_temp_role(interaction.guild_id, interaction.user.id, role.id, expires, self.bot.user.id)
             ts = int(datetime.datetime.fromisoformat(expires).timestamp())
             await interaction.response.send_message(

@@ -18,6 +18,7 @@ class DbWatchCog(commands.Cog):
         self.fails = 0
         self.down = False
         self.last_error = ""
+        self._log_channels: dict[int, int] = {}  # guild_id -> logs_channel_id (caché para alertar sin DB)
         self.watch.start()
         self.renew_reminder.start()
 
@@ -45,12 +46,13 @@ class DbWatchCog(commands.Cog):
     async def renew_reminder(self):
         if not self._renew_due():
             return
-        self._renew_mark()
-        await self._alert(
+        delivered = await self._alert(
             f"🔔 **Recordatorio:** renueva el servidor en el panel de Orihost "
             f"(cada ~{RENEW_EVERY_DAYS} días) para que SoulBot no se apague. "
             f"Panel → tu server → Renew. Tras renovar no hay que hacer nada más."
         )
+        if delivered:
+            self._renew_mark()
 
     @renew_reminder.before_loop
     async def _renew_before(self):
@@ -66,16 +68,36 @@ class DbWatchCog(commands.Cog):
             self.last_error = str(e)[:200]
             return False, None
 
-    async def _alert(self, text: str):
+    async def _alert(self, text: str) -> bool:
+        """Avisa por consola + canal de logs. No usa la DB (puede estar caída). Devuelve si llegó a algún canal."""
+        import discord
         print(f"[dbwatch] {text}", flush=True)
+        delivered = False
         for guild in self.bot.guilds:
             try:
-                cfg = await db.get_guild_config(guild.id)
-                ch_id = cfg.get("logs_channel_id")
-                if ch_id and (ch := guild.get_channel(ch_id)):
+                ch_id = self._log_channels.get(guild.id)
+                if ch_id is None:
+                    try:
+                        cfg = await db.get_guild_config(guild.id)
+                        ch_id = cfg.get("logs_channel_id")
+                        if ch_id:
+                            self._log_channels[guild.id] = ch_id
+                    except Exception:
+                        ch_id = None
+                if not ch_id:
+                    continue
+                ch = guild.get_channel(ch_id)
+                if ch is None:
+                    try:
+                        ch = await guild.fetch_channel(ch_id)
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        ch = None
+                if ch:
                     await ch.send(text)
+                    delivered = True
             except Exception:
                 pass
+        return delivered
 
     @tasks.loop(minutes=5)
     async def watch(self):
@@ -83,6 +105,14 @@ class DbWatchCog(commands.Cog):
             return
         ok, _ = await self._ping()
         if ok:
+            # mantiene caliente la caché de canales de logs (barato: get_guild_config cachea 45s)
+            for guild in self.bot.guilds:
+                try:
+                    cfg = await db.get_guild_config(guild.id)
+                    if cfg.get("logs_channel_id"):
+                        self._log_channels[guild.id] = cfg["logs_channel_id"]
+                except Exception:
+                    pass
             if self.down:
                 self.down = False
                 self.fails = 0

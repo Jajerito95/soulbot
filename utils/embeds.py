@@ -18,6 +18,10 @@ def get_footer_icon() -> Optional[str]:
 
 
 def base_embed(description: str, color: int = COLOR, title: Optional[str] = None, footer: Optional[str] = None) -> discord.Embed:
+    if description and len(description) > 4096:
+        description = description[:4093] + "…"
+    if title and len(title) > 256:
+        title = title[:253] + "…"
     embed = discord.Embed(description=description, color=color)
     if title:
         embed.title = title

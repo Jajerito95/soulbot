@@ -24,6 +24,10 @@ class _CursorWrapper:
     def lastrowid(self):
         return self._cursor.lastrowid
 
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+
     async def fetchone(self):
         return await asyncio.to_thread(self._cursor.fetchone)
 
@@ -40,7 +44,7 @@ class TursoConnection:
     @staticmethod
     def _safe_params(params):
         """
-        Convierte cada parámetro int/bool a str antes de enviarlo a libsql.
+        Convierte parámetros antes de enviarlos a libsql.
 
         Por qué: el binding de parámetros de la librería 'libsql' pierde precisión
         en enteros grandes (como los IDs de Discord, de 18-19 dígitos) porque los
@@ -48,8 +52,15 @@ class TursoConnection:
         SQLite los reconvierte solo a INTEGER por afinidad de columna y se leen
         de vuelta como int de Python, sin ninguna pérdida. Números pequeños
         (XP, niveles, precios, contadores) no se ven afectados de ninguna forma.
+        Los bool van como 0/1 (no como "True"/"False").
         """
-        return tuple(str(p) if isinstance(p, (int, bool)) else p for p in params)
+        def _conv(p):
+            if isinstance(p, bool):
+                return int(p)
+            if isinstance(p, int):
+                return str(p)
+            return p
+        return tuple(_conv(p) for p in params)
 
     async def _reconnect(self):
         if not self._url or not self._auth:
