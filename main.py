@@ -129,6 +129,11 @@ async def on_ready():
         bot._console_started = True
         from utils.console import console_loop
         asyncio.get_event_loop().create_task(console_loop(bot))
+    # forense de bloqueos del loop
+    if not getattr(bot, "_loopwatch_started", False):
+        bot._loopwatch_started = True
+        from utils.loopwatch import loop_watch
+        asyncio.get_event_loop().create_task(loop_watch(bot))
 
 
 def main():
