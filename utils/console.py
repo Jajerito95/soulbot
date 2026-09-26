@@ -432,8 +432,9 @@ async def _cmd_dbstatus(bot, args):
         w = bot.get_cog("DbWatchCog")
         fails = getattr(w, "fails", 0) if w else 0
         down = getattr(w, "down", False) if w else False
+        rss = getattr(w, "rss_mb", None) if w else None
         state = "🚨 CAÍDA" if down else "✅ OK"
-        _out(f"💾 DB: {mode} | {state} | ping {ms}ms | fallos seguidos: {fails}")
+        _out(f"💾 DB: {mode} | {state} | ping {ms}ms | fallos seguidos: {fails} | RAM: {rss or '?'}MB")
     except Exception as e:
         _out(f"🚨 DB CAÍDA ({mode}): {e}")
 

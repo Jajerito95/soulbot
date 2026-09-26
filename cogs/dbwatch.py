@@ -1,5 +1,6 @@
 from __future__ import annotations
 """Vigilante de Turso: ping cada 5 min, avisa si cae y cuando vuelve."""
+import asyncio
 import os
 import time
 
@@ -11,6 +12,16 @@ from config import DATA_DIR
 RENEW_EVERY_DAYS = 3  # avisa cada 3 días para renovar el server en el panel
 RENEW_MARKER = os.path.join(DATA_DIR, "last_renew_reminder.txt")
 
+RAM_PURGE_MB = 420  # si la RAM pasa de esto, purga cachés y avisa (Orihost mata en ~512)
+
+
+def _rss_mb() -> int | None:
+    try:
+        import resource
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
+    except Exception:
+        return None
+
 
 class DbWatchCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -18,6 +29,7 @@ class DbWatchCog(commands.Cog):
         self.fails = 0
         self.down = False
         self.last_error = ""
+        self.rss_mb: int | None = None
         self._log_channels: dict[int, int] = {}  # guild_id -> logs_channel_id (caché para alertar sin DB)
         self.watch.start()
         self.renew_reminder.start()
@@ -104,6 +116,18 @@ class DbWatchCog(commands.Cog):
         if not db.USING_TURSO:
             return
         ok, _ = await self._ping()
+        # vigilante de RAM: confirma si las caídas son por memoria y purga antes del OOM-kill
+        self.rss_mb = await asyncio.to_thread(_rss_mb)
+        if self.rss_mb and self.rss_mb >= RAM_PURGE_MB:
+            try:
+                from utils.card_renderer import _avatar_cache
+                _avatar_cache.clear()
+            except Exception:
+                pass
+            await asyncio.to_thread(__import__("gc").collect)
+            after = await asyncio.to_thread(_rss_mb)
+            print(f"[dbwatch] ⚠️ RAM alta: {self.rss_mb}MB → purga → {after}MB", flush=True)
+            self.rss_mb = after
         if ok:
             # mantiene caliente la caché de canales de logs (barato: get_guild_config cachea 45s)
             for guild in self.bot.guilds:
