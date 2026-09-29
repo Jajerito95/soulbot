@@ -314,8 +314,13 @@ async def init_db():
             max_hp INTEGER,
             current_hp INTEGER,
             image_url TEXT,
+            title TEXT,
+            description TEXT,
+            color_hex TEXT,
             status TEXT DEFAULT 'active',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            starts_at TEXT,
+            ends_at TEXT,
             ended_at TEXT
         );
 
