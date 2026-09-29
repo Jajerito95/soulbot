@@ -495,9 +495,8 @@ class BossCreateModalStep1(ui.Modal, title='Crear Boss Semanal - Paso 1'):
         self.add_item(self.titulo)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)
         # Open second modal
-        await interaction.followup.send_modal(BossCreateModalStep2(self.cog, self.guild_id,
+        await interaction.response.send_modal(BossCreateModalStep2(self.cog, self.guild_id,
             nombre=self.nombre.value.strip(),
             hp=self.hp.value.strip(),
             imagen=self.imagen.value.strip() or None,
