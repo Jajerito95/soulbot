@@ -425,6 +425,28 @@ async def init_db():
         except Exception:
             pass
 
+    # --- Migration: columnas nuevas de boss_current (title/description/color/starts/ends) ---
+    try:
+        _boss_cols = {row[1] for row in await (await _db.execute("PRAGMA table_info(boss_current)")).fetchall()}
+    except Exception:
+        _boss_cols = set()
+    for _col, _typ in (
+        ("title", "TEXT"),
+        ("description", "TEXT"),
+        ("color_hex", "TEXT"),
+        ("starts_at", "TEXT"),
+        ("ends_at", "TEXT"),
+    ):
+        if _col not in _boss_cols:
+            try:
+                await _db.execute(f"ALTER TABLE boss_current ADD COLUMN {_col} {_typ}")
+            except Exception:
+                pass
+    try:
+        await _db.commit()
+    except Exception:
+        pass
+
     # --- One-time migration: reduce all balances by 30% ---
     try:
         flag_cols = {row[1] for row in await (await _db.execute("PRAGMA table_info(_migrations)")).fetchall()}

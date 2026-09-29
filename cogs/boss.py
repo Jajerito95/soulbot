@@ -532,11 +532,7 @@ class BossCreateDetailsModal(ui.Modal, title='Detalles del Boss'):
         self.color = ui.TextInput(label='Color hex (opcional)', placeholder='#FF0000', max_length=7, required=False)
         self.add_item(self.color)
 
-        self.starts_at = ui.TextInput(label='Inicio (YYYY-MM-DD HH:MM)', placeholder='2026-10-05 00:00', max_length=16, required=False)
-        self.add_item(self.starts_at)
-
-        self.ends_at = ui.TextInput(label='Fin (YYYY-MM-DD HH:MM)', placeholder='2026-10-10 23:59', max_length=16, required=False)
-        self.add_item(self.ends_at)
+        # sin campos de fecha: duración fija de 7 días desde la creación
 
     async def on_submit(self, interaction: discord.Interaction):
         data = self.cog._pending.pop(self.author_id, None)
@@ -546,9 +542,6 @@ class BossCreateDetailsModal(ui.Modal, title='Detalles del Boss'):
         titulo = self.titulo.value.strip() or None
         descripcion = self.descripcion.value.strip() or None
         color = self.color.value.strip() or None
-        starts_at = self.starts_at.value.strip() or None
-        ends_at = self.ends_at.value.strip() or None
-
         if color:
             hex_clean = color.strip().lstrip("#")
             if len(hex_clean) != 6 or any(c not in "0123456789abcdefABCDEF" for c in hex_clean):
@@ -557,18 +550,10 @@ class BossCreateDetailsModal(ui.Modal, title='Detalles del Boss'):
                 return
             color = "#" + hex_clean.upper()
 
+        # duración fija: 7 días desde la creación
         now = datetime.datetime.utcnow()
         starts_at_str = now.strftime("%Y-%m-%d %H:%M:%S")
         ends_at_str = (now + datetime.timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-        try:
-            if starts_at:
-                starts_at_str = datetime.datetime.strptime(starts_at, "%Y-%m-%d %H:%M").strftime("%Y-%m-%d %H:%M:%S")
-            if ends_at:
-                ends_at_str = datetime.datetime.strptime(ends_at, "%Y-%m-%d %H:%M").strftime("%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            await interaction.response.send_message(embed=error_embed("Fecha inválida. Usa YYYY-MM-DD HH:MM (ej. 2026-10-05 00:00)."), ephemeral=True)
-            self.cog._pending[self.author_id] = data
-            return
 
         guild_id = data["guild_id"]
         nombre = data["nombre"]
