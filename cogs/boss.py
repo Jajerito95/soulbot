@@ -191,7 +191,7 @@ class BossCog(commands.Cog):
         if not interaction.user.guild_permissions.manage_guild:
             await interaction.response.send_message(embed=error_embed("Solo Staff."), ephemeral=True)
             return
-        await interaction.response.send_modal(BossCreateModal(self, interaction.guild_id))
+        await interaction.response.send_modal(BossCreateModalStep1(self, interaction.guild_id))
 
     @boss.command(name="end", description="Termina boss y reparte (Staff)")
     async def end(self, interaction: discord.Interaction):
@@ -473,7 +473,7 @@ async def setup(bot: commands.Bot):
     await bot.add_cog(BossCog(bot))
 
 
-class BossCreateModal(ui.Modal, title='Crear Boss Semanal'):
+class BossCreateModalStep1(ui.Modal, title='Crear Boss Semanal - Paso 1'):
     def __init__(self, cog: BossCog, guild_id: int):
         super().__init__()
         self.cog = cog
@@ -494,6 +494,29 @@ class BossCreateModal(ui.Modal, title='Crear Boss Semanal'):
         self.titulo = ui.TextInput(label='Título (opcional)', required=False)
         self.add_item(self.titulo)
 
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=False)
+        # Open second modal
+        await interaction.followup.send_modal(BossCreateModalStep2(self.cog, self.guild_id,
+            nombre=self.nombre.value.strip(),
+            hp=self.hp.value.strip(),
+            imagen=self.imagen.value.strip() or None,
+            canal=self.canal.value.strip() or None,
+            titulo=self.titulo.value.strip() or None
+        ))
+
+
+class BossCreateModalStep2(ui.Modal, title='Crear Boss Semanal - Paso 2'):
+    def __init__(self, cog: BossCog, guild_id: int, nombre: str, hp: str, imagen: str | None, canal: str | None, titulo: str | None):
+        super().__init__()
+        self.cog = cog
+        self.guild_id = guild_id
+        self.nombre = nombre
+        self.hp = hp
+        self.imagen = imagen
+        self.canal = canal
+        self.titulo = titulo
+
         self.descripcion = ui.TextInput(label='Descripción (opcional)', style=discord.TextStyle.paragraph, required=False)
         self.add_item(self.descripcion)
 
@@ -508,33 +531,31 @@ class BossCreateModal(ui.Modal, title='Crear Boss Semanal'):
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
-        nombre = self.nombre.value.strip()
-        hp_str = self.hp.value.strip()
-        imagen = self.imagen.value.strip() or None
-        canal_str = self.canal.value.strip() or None
-        titulo = self.titulo.value.strip() or None
         descripcion = self.descripcion.value.strip() or None
         color = self.color.value.strip() or None
         starts_at = self.starts_at.value.strip() or None
         ends_at = self.ends_at.value.strip() or None
 
+        # Validate HP
         try:
-            hp = int(hp_str)
-            if hp <= 0:
+            hp_int = int(self.hp)
+            if hp_int <= 0:
                 raise ValueError
         except ValueError:
             await interaction.followup.send(embed=error_embed("HP debe ser un entero positivo."), ephemeral=True)
             return
 
+        # Check for existing active boss
         cur = await self.cog.db.db().execute("SELECT 1 FROM boss_current WHERE guild_id=? AND status='active'", (self.guild_id,))
         if await cur.fetchone():
             await interaction.followup.send(embed=error_embed("Ya hay un boss activo. Usa /boss end primero."), ephemeral=True)
             return
 
+        # Determine channel
         target_ch = None
-        if canal_str:
+        if self.canal:
             try:
-                canal_id = int(canal_str)
+                canal_id = int(self.canal)
                 target_ch = self.cog.bot.get_channel(canal_id)
                 if not isinstance(target_ch, discord.TextChannel):
                     target_ch = None
@@ -546,6 +567,7 @@ class BossCreateModal(ui.Modal, title='Crear Boss Semanal'):
                 await interaction.followup.send(embed=error_embed("No se pudo determinar el canal. Proporcione un ID de canal de texto válido."), ephemeral=True)
                 return
 
+        # Set default start/end times if not provided
         now = datetime.datetime.utcnow()
         if starts_at is None:
             starts_at_str = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -556,38 +578,40 @@ class BossCreateModal(ui.Modal, title='Crear Boss Semanal'):
         else:
             ends_at_str = ends_at
 
+        # Insert boss
         await self.cog.db.db().execute(
             "INSERT INTO boss_current (guild_id, boss_name, max_hp, current_hp, image_url, status, title, description, color_hex, starts_at, ends_at) "
             "VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)",
-            (self.guild_id, nombre, hp, hp, imagen, titulo, descripcion, color, starts_at_str, ends_at_str)
+            (self.guild_id, self.nombre, hp_int, hp_int, self.imagen, self.titulo, descripcion, color, starts_at_str, ends_at_str)
         )
         await self.cog.db.db().commit()
         cur2 = await self.cog.db.db().execute("SELECT id FROM boss_current WHERE guild_id=? AND status='active' ORDER BY id DESC LIMIT 1", (self.guild_id,))
         row2 = await cur2.fetchone()
         eid = row2[0] if row2 else 0
 
+        # Render and send card
         pillow = await asyncio.to_thread(
             render_boss_pillow,
-            nombre,
-            hp,
-            hp,
+            self.nombre,
+            hp_int,
+            hp_int,
             [],
-            imagen,
+            self.imagen,
             0,
-            titulo,
+            self.titulo,
             descripcion,
             color,
         )
         file = discord.File(io.BytesIO(pillow), filename="boss.png") if pillow else None
 
         embed = base_embed(
-            f"👹 **{titulo if titulo else nombre}** ha aparecido con **{hp:,} HP**\n"
+            f"👹 **{self.titulo if self.titulo else self.nombre}** ha aparecido con **{hp_int:,} HP**\n"
             f"La daño se hace con **XP × 5** — ¡habla y sube de nivel!",
             COLOR,
             title="👹 Boss Semanal",
         )
-        if imagen and not file:
-            embed.set_image(url=imagen)
+        if self.imagen and not file:
+            embed.set_image(url=self.imagen)
         if file:
             embed.set_image(url="attachment://boss.png")
         embed.set_footer(text=f"Boss ID {eid} • SoulSeeker™")
@@ -600,4 +624,4 @@ class BossCreateModal(ui.Modal, title='Crear Boss Semanal'):
             msg = await target_ch.send(embed=embed)
             self.cog._last_boss_msg[self.guild_id] = (target_ch.id, msg.id)
 
-        await interaction.followup.send(embed=success_embed(f"Boss **{nombre}** creado en {target_ch.mention} con **{hp:,} HP**\nDaño: XP × 5", title="👹 Boss creado"))
+        await interaction.followup.send(embed=success_embed(f"Boss **{self.nombre}** creado en {target_ch.mention} con **{hp_int:,} HP**\nDaño: XP × 5", title="👹 Boss creado"))
