@@ -77,10 +77,21 @@ def render_boss_pillow(boss_name: str, current_hp: int, max_hp: int,
         BG = (20, 16, 16)
         accent = (231, 76, 60)
         accent_light = (255, 120, 100)
+        if color_hex:
+            hex_clean = color_hex.strip().lstrip("#")
+            if len(hex_clean) == 6:
+                try:
+                    r = int(hex_clean[0:2], 16)
+                    g = int(hex_clean[2:4], 16)
+                    b = int(hex_clean[4:6], 16)
+                    accent = (r, g, b)
+                    accent_light = (min(255, r + 30), min(255, g + 30), min(255, b + 30))
+                except ValueError:
+                    pass
 
         base = _vgradient(W, H, BG, (50, 26, 26))
 
-        # diagonal accent rojo sutil
+        # diagonal accent sutil
         overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         odraw = ImageDraw.Draw(overlay)
         odraw.polygon([(W - 240, 0), (W, 0), (W, H), (W - 400, H)], fill=accent + (30,))
@@ -114,16 +125,24 @@ def render_boss_pillow(boss_name: str, current_hp: int, max_hp: int,
 
         tx = 340 if image_url else 28
 
-        # boss name
-        draw.text((tx, 24), f"👹 {boss_name[:24]}", font=font_title, fill=(255, 255, 255, 255))
+        # boss name (usa el título personalizado si hay)
+        display_name = (title or boss_name)[:24]
+        draw.text((tx, 24), f"👹 {display_name}", font=font_title, fill=(255, 255, 255, 255))
+
+        # descripción opcional bajo el nombre (desplaza la barra)
+        bar_dy = 80
+        if description:
+            desc = description.strip().replace("\n", " ")[:90]
+            draw.text((tx, 62), desc, font=font_s, fill=(200, 200, 200, 255))
+            bar_dy = 92
 
         # HP bar — thick
         pct = current_hp / max_hp if max_hp else 0
-        bar_x, bar_y, bar_w, bar_h = tx, 80, W - tx - 28, 32
+        bar_x, bar_y, bar_w, bar_h = tx, bar_dy, W - tx - 28, 32
         draw.rounded_rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], radius=16, fill=(45, 40, 40, 255), outline=(60, 40, 40, 255), width=1)
         fill_w = int(bar_w * pct)
         if fill_w > 4:
-            fimg = _hgradient(fill_w, bar_h, (231, 76, 60), (255, 100, 60))
+            fimg = _hgradient(fill_w, bar_h, accent, accent_light)
             fm = Image.new("L", (fill_w, bar_h), 0)
             ImageDraw.Draw(fm).rounded_rectangle([0, 0, fill_w, bar_h], radius=16, fill=255)
             if pct < 0.98:
@@ -132,12 +151,12 @@ def render_boss_pillow(boss_name: str, current_hp: int, max_hp: int,
         draw.text((bar_x + bar_w // 2, bar_y + 8), f"{current_hp:,} / {max_hp:,} HP", font=font_s, fill=(255, 255, 255, 255), anchor="mm")
 
         # damage dealt info
-        draw.text((tx, 128), f"Daño total: {total_damage_dealt:,}", font=font_r, fill=accent + (255,))
+        draw.text((tx, bar_y + 48), f"Daño total: {total_damage_dealt:,}", font=font_r, fill=accent + (255,))
 
         # top 3 damage
-        draw.text((tx, 168), "⚔️ Top Daño:", font=font_r, fill=(255, 255, 255, 255))
+        draw.text((tx, bar_y + 82), "⚔️ Top Daño:", font=font_r, fill=(255, 255, 255, 255))
         medal_colors = [(255, 215, 0), (192, 192, 192), (205, 127, 80)]
-        y = 200
+        y = bar_y + 112
         for i, (name, dmg) in enumerate(top[:3]):
             mc = medal_colors[i] if i < 3 else (200, 200, 200)
             draw.ellipse([tx, y + 4, tx + 16, y + 20], fill=mc + (255,))
@@ -183,15 +202,40 @@ class BossCog(commands.Cog):
         self._msg_counter: dict[int, int] = {}  # guild_id -> message count since last post
         self._last_boss_msg: dict[int, tuple[int, int]] = {}  # guild_id -> (channel_id, message_id), sin retener Message
         self._last_repost: dict[int, float] = {}  # guild_id -> timestamp último repost
+        self._pending: dict[int, dict] = {}  # user_id -> datos básicos del /boss create pendientes del modal
 
     boss = app_commands.Group(name="boss", description="Boss semanal")
 
     @boss.command(name="create", description="Crea el boss semanal (Staff)")
-    async def create(self, interaction: discord.Interaction):
+    @app_commands.describe(nombre="Nombre del boss", hp="HP total", imagen="URL imagen", canal="Canal donde aparecerá")
+    async def create(
+        self,
+        interaction: discord.Interaction,
+        nombre: str,
+        hp: app_commands.Range[int, 1000, 1000000] = 100000,
+        imagen: Optional[str] = None,
+        canal: Optional[discord.TextChannel] = None,
+    ):
         if not interaction.user.guild_permissions.manage_guild:
             await interaction.response.send_message(embed=error_embed("Solo Staff."), ephemeral=True)
             return
-        await interaction.response.send_modal(BossCreateModalStep1(self, interaction.guild_id))
+        cur = await db.db().execute("SELECT 1 FROM boss_current WHERE guild_id=? AND status='active'", (interaction.guild_id,))
+        if await cur.fetchone():
+            await interaction.response.send_message(embed=error_embed("Ya hay un boss activo. Usa /boss end primero."), ephemeral=True)
+            return
+        target_ch = canal or interaction.channel
+        if not isinstance(target_ch, discord.TextChannel):
+            await interaction.response.send_message(embed=error_embed("El canal debe ser un canal de texto."), ephemeral=True)
+            return
+        self._pending[interaction.user.id] = {
+            "nombre": nombre[:100], "hp": hp, "imagen": imagen,
+            "canal_id": target_ch.id, "guild_id": interaction.guild_id, "ts": time.time(),
+        }
+        # purga sesiones pendientes de más de 15 min (modal nunca enviado)
+        now_ts = time.time()
+        for uid in [k for k, v in self._pending.items() if now_ts - v.get("ts", now_ts) > 900]:
+            self._pending.pop(uid, None)
+        await interaction.response.send_modal(BossCreateDetailsModal(self, interaction.user.id))
 
     @boss.command(name="end", description="Termina boss y reparte (Staff)")
     async def end(self, interaction: discord.Interaction):
@@ -473,154 +517,114 @@ async def setup(bot: commands.Bot):
     await bot.add_cog(BossCog(bot))
 
 
-class BossCreateModalStep1(ui.Modal, title='Crear Boss Semanal - Paso 1'):
-    def __init__(self, cog: BossCog, guild_id: int):
+class BossCreateDetailsModal(ui.Modal, title='Detalles del Boss'):
+    def __init__(self, cog: BossCog, author_id: int):
         super().__init__()
         self.cog = cog
-        self.guild_id = guild_id
+        self.author_id = author_id
 
-        self.nombre = ui.TextInput(label='Nombre del boss', placeholder='Ej. Dragón Anciano', max_length=100)
-        self.add_item(self.nombre)
-
-        self.hp = ui.TextInput(label='HP total', placeholder='Ej. 100000', default='100000', max_length=10)
-        self.add_item(self.hp)
-
-        self.imagen = ui.TextInput(label='URL de imagen (opcional)', placeholder='https://ejemplo.com/imagen.png', required=False)
-        self.add_item(self.imagen)
-
-        self.canal = ui.TextInput(label='ID del canal (opcional)', placeholder='123456789012345678', required=False)
-        self.add_item(self.canal)
-
-        self.titulo = ui.TextInput(label='Título (opcional)', required=False)
+        self.titulo = ui.TextInput(label='Título (opcional)', placeholder='Ej. Rey Demonio', max_length=100, required=False)
         self.add_item(self.titulo)
 
-    async def on_submit(self, interaction: discord.Interaction):
-        # Open second modal
-        await interaction.response.send_modal(BossCreateModalStep2(self.cog, self.guild_id,
-            nombre=self.nombre.value.strip(),
-            hp=self.hp.value.strip(),
-            imagen=self.imagen.value.strip() or None,
-            canal=self.canal.value.strip() or None,
-            titulo=self.titulo.value.strip() or None
-        ))
-
-
-class BossCreateModalStep2(ui.Modal, title='Crear Boss Semanal - Paso 2'):
-    def __init__(self, cog: BossCog, guild_id: int, nombre: str, hp: str, imagen: str | None, canal: str | None, titulo: str | None):
-        super().__init__()
-        self.cog = cog
-        self.guild_id = guild_id
-        self.nombre = nombre
-        self.hp = hp
-        self.imagen = imagen
-        self.canal = canal
-        self.titulo = titulo
-
-        self.descripcion = ui.TextInput(label='Descripción (opcional)', style=discord.TextStyle.paragraph, required=False)
+        self.descripcion = ui.TextInput(label='Descripción (opcional)', style=discord.TextStyle.paragraph, max_length=300, required=False)
         self.add_item(self.descripcion)
 
-        self.color = ui.TextInput(label='Color en hex (ej. #FF0000) (opcional)', placeholder='#FF0000', required=False)
+        self.color = ui.TextInput(label='Color hex (opcional)', placeholder='#FF0000', max_length=7, required=False)
         self.add_item(self.color)
 
-        self.starts_at = ui.TextInput(label='Fecha inicio (YYYY-MM-DD HH:MM:SS) (opcional)', placeholder='2026-09-30 00:00:00', required=False)
+        self.starts_at = ui.TextInput(label='Inicio (YYYY-MM-DD HH:MM)', placeholder='2026-10-05 00:00', max_length=16, required=False)
         self.add_item(self.starts_at)
 
-        self.ends_at = ui.TextInput(label='Fecha fin (YYYY-MM-DD HH:MM:SS) (opcional)', placeholder='2026-10-07 23:59:59', required=False)
+        self.ends_at = ui.TextInput(label='Fin (YYYY-MM-DD HH:MM)', placeholder='2026-10-10 23:59', max_length=16, required=False)
         self.add_item(self.ends_at)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)
+        data = self.cog._pending.pop(self.author_id, None)
+        if data is None:
+            await interaction.response.send_message(embed=error_embed("Sesión expirada. Vuelve a usar /boss create."), ephemeral=True)
+            return
+        titulo = self.titulo.value.strip() or None
         descripcion = self.descripcion.value.strip() or None
         color = self.color.value.strip() or None
         starts_at = self.starts_at.value.strip() or None
         ends_at = self.ends_at.value.strip() or None
 
-        # Validate HP
-        try:
-            hp_int = int(self.hp)
-            if hp_int <= 0:
-                raise ValueError
-        except ValueError:
-            await interaction.followup.send(embed=error_embed("HP debe ser un entero positivo."), ephemeral=True)
-            return
-
-        # Check for existing active boss
-        cur = await self.cog.db.db().execute("SELECT 1 FROM boss_current WHERE guild_id=? AND status='active'", (self.guild_id,))
-        if await cur.fetchone():
-            await interaction.followup.send(embed=error_embed("Ya hay un boss activo. Usa /boss end primero."), ephemeral=True)
-            return
-
-        # Determine channel
-        target_ch = None
-        if self.canal:
-            try:
-                canal_id = int(self.canal)
-                target_ch = self.cog.bot.get_channel(canal_id)
-                if not isinstance(target_ch, discord.TextChannel):
-                    target_ch = None
-            except ValueError:
-                target_ch = None
-        if target_ch is None:
-            target_ch = interaction.channel
-            if not isinstance(target_ch, discord.TextChannel):
-                await interaction.followup.send(embed=error_embed("No se pudo determinar el canal. Proporcione un ID de canal de texto válido."), ephemeral=True)
+        if color:
+            hex_clean = color.strip().lstrip("#")
+            if len(hex_clean) != 6 or any(c not in "0123456789abcdefABCDEF" for c in hex_clean):
+                await interaction.response.send_message(embed=error_embed("Color inválido. Usa formato #RRGGBB (ej. #FF0000)."), ephemeral=True)
+                self.cog._pending[self.author_id] = data
                 return
+            color = "#" + hex_clean.upper()
 
-        # Set default start/end times if not provided
         now = datetime.datetime.utcnow()
-        if starts_at is None:
-            starts_at_str = now.strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            starts_at_str = starts_at
-        if ends_at is None:
-            ends_at_str = (now + datetime.timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            ends_at_str = ends_at
+        starts_at_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        ends_at_str = (now + datetime.timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            if starts_at:
+                starts_at_str = datetime.datetime.strptime(starts_at, "%Y-%m-%d %H:%M").strftime("%Y-%m-%d %H:%M:%S")
+            if ends_at:
+                ends_at_str = datetime.datetime.strptime(ends_at, "%Y-%m-%d %H:%M").strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            await interaction.response.send_message(embed=error_embed("Fecha inválida. Usa YYYY-MM-DD HH:MM (ej. 2026-10-05 00:00)."), ephemeral=True)
+            self.cog._pending[self.author_id] = data
+            return
 
-        # Insert boss
-        await self.cog.db.db().execute(
+        guild_id = data["guild_id"]
+        nombre = data["nombre"]
+        hp = data["hp"]
+        imagen = data["imagen"]
+        cur = await db.db().execute("SELECT 1 FROM boss_current WHERE guild_id=? AND status='active'", (guild_id,))
+        if await cur.fetchone():
+            await interaction.response.send_message(embed=error_embed("Ya hay un boss activo. Usa /boss end primero."), ephemeral=True)
+            return
+        guild = self.cog.bot.get_guild(guild_id)
+        target_ch = guild.get_channel(data["canal_id"]) if guild else None
+        if not isinstance(target_ch, discord.TextChannel):
+            target_ch = interaction.channel
+        if not isinstance(target_ch, discord.TextChannel):
+            await interaction.response.send_message(embed=error_embed("No se pudo determinar el canal."), ephemeral=True)
+            return
+        await db.db().execute(
+            "INSERT INTO boss_config (guild_id, channel_id, enabled) VALUES (?, ?, 1) "
+            "ON CONFLICT(guild_id) DO UPDATE SET channel_id=?, enabled=1",
+            (guild_id, target_ch.id, target_ch.id)
+        )
+        await db.db().commit()
+        await db.db().execute(
             "INSERT INTO boss_current (guild_id, boss_name, max_hp, current_hp, image_url, status, title, description, color_hex, starts_at, ends_at) "
             "VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)",
-            (self.guild_id, self.nombre, hp_int, hp_int, self.imagen, self.titulo, descripcion, color, starts_at_str, ends_at_str)
+            (guild_id, nombre, hp, hp, imagen, titulo, descripcion, color, starts_at_str, ends_at_str)
         )
-        await self.cog.db.db().commit()
-        cur2 = await self.cog.db.db().execute("SELECT id FROM boss_current WHERE guild_id=? AND status='active' ORDER BY id DESC LIMIT 1", (self.guild_id,))
+        await db.db().commit()
+        cur2 = await db.db().execute("SELECT id FROM boss_current WHERE guild_id=? AND status='active' ORDER BY id DESC LIMIT 1", (guild_id,))
         row2 = await cur2.fetchone()
         eid = row2[0] if row2 else 0
 
-        # Render and send card
         pillow = await asyncio.to_thread(
-            render_boss_pillow,
-            self.nombre,
-            hp_int,
-            hp_int,
-            [],
-            self.imagen,
-            0,
-            self.titulo,
-            descripcion,
-            color,
+            render_boss_pillow, nombre, hp, hp, [], imagen, 0, titulo, descripcion, color,
         )
         file = discord.File(io.BytesIO(pillow), filename="boss.png") if pillow else None
-
         embed = base_embed(
-            f"👹 **{self.titulo if self.titulo else self.nombre}** ha aparecido con **{hp_int:,} HP**\n"
-            f"La daño se hace con **XP × 5** — ¡habla y sube de nivel!",
-            COLOR,
-            title="👹 Boss Semanal",
+            f"👹 **{titulo if titulo else nombre}** ha aparecido con **{hp:,} HP**\n"
+            f"El daño se hace con **XP × 5** — ¡habla y sube de nivel!",
+            COLOR, title="👹 Boss Semanal",
         )
-        if self.imagen and not file:
-            embed.set_image(url=self.imagen)
+        if imagen and not file:
+            embed.set_image(url=imagen)
         if file:
             embed.set_image(url="attachment://boss.png")
         embed.set_footer(text=f"Boss ID {eid} • SoulSeeker™")
-
         try:
-            msg = await target_ch.send(embed=embed, view=None, file=file) if file else await target_ch.send(embed=embed)
-            self.cog._last_boss_msg[self.guild_id] = (target_ch.id, msg.id)
-            self.cog._msg_counter[self.guild_id] = 0
+            msg = await target_ch.send(embed=embed, file=file) if file else await target_ch.send(embed=embed)
+            self.cog._last_boss_msg[guild_id] = (target_ch.id, msg.id)
+            self.cog._msg_counter[guild_id] = 0
         except Exception:
-            msg = await target_ch.send(embed=embed)
-            self.cog._last_boss_msg[self.guild_id] = (target_ch.id, msg.id)
+            pass
+        await interaction.response.send_message(
+            embed=success_embed(f"Boss **{nombre}** creado en {target_ch.mention} con **{hp:,} HP**", title="👹 Boss creado"),
+            ephemeral=True,
+        )
 
-        await interaction.followup.send(embed=success_embed(f"Boss **{self.nombre}** creado en {target_ch.mention} con **{hp_int:,} HP**\nDaño: XP × 5", title="👹 Boss creado"))
+
+# (BossCreateModalStep2 eliminado: Discord no permite responder a un modal con otro modal; ahora se usa BossCreateDetailsModal)
