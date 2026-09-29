@@ -488,7 +488,7 @@ class BossCreateModalStep1(ui.Modal, title='Crear Boss Semanal - Paso 1'):
         self.imagen = ui.TextInput(label='URL de imagen (opcional)', placeholder='https://ejemplo.com/imagen.png', required=False)
         self.add_item(self.imagen)
 
-        self.canal = ui.TextInput(label='ID del canal (opcional, deja vacío para usar este canal)', placeholder='123456789012345678', required=False)
+        self.canal = ui.TextInput(label='ID del canal (opcional)', placeholder='123456789012345678', required=False)
         self.add_item(self.canal)
 
         self.titulo = ui.TextInput(label='Título (opcional)', required=False)
