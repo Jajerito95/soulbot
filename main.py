@@ -21,7 +21,8 @@ COGS = ["cogs.embed", "cogs.welcome", "cogs.suggestions", "cogs.tickets", "cogs.
 
 class SoulBot(commands.Bot):
     def __init__(self):
-        super().__init__(command_prefix="!", intents=INTENTS)
+        # max_messages bajo: el bot no re-lee historial, solo necesita el contexto reciente
+        super().__init__(command_prefix="!", intents=INTENTS, max_messages=100)
 
     async def setup_hook(self):
         await init_db()
