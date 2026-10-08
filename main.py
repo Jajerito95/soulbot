@@ -124,11 +124,16 @@ async def on_ready():
     from utils.embeds import set_footer_icon
     set_footer_icon(bot.user.display_avatar.url)
     await bot.change_presence(activity=discord.Game(name="SoulSeeker™"))
-    # consola de administración por stdin (panel tipo Pterodactyl)
+    # consola de administración por stdin (solo si hay terminal: panel tipo Pterodactyl.
+    # En Railway no hay stdin interactivo y solo ensuciaría los logs)
     if not getattr(bot, "_console_started", False):
         bot._console_started = True
-        from utils.console import console_loop
-        asyncio.get_event_loop().create_task(console_loop(bot))
+        import sys as _sys
+        if _sys.stdin.isatty():
+            from utils.console import console_loop
+            asyncio.get_event_loop().create_task(console_loop(bot))
+        else:
+            log.info("Consola stdin desactivada (sin TTY). Usa los slash commands.")
     # forense de bloqueos del loop
     if not getattr(bot, "_loopwatch_started", False):
         bot._loopwatch_started = True
