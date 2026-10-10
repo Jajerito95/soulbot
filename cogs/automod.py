@@ -116,7 +116,12 @@ class AutoModCog(commands.Cog):
         perms = getattr(message.author, "guild_permissions", None)
         if perms is not None and perms.moderate_members:
             return
+        try:
+            await self._on_message_impl(message)
+        except Exception:
+            pass  # un hipo de DB no debe romper el listener global de mensajes
 
+    async def _on_message_impl(self, message: discord.Message):
         now = time.time()
         user_id = message.author.id
         content = message.content or ""

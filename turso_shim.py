@@ -11,6 +11,21 @@ from __future__ import annotations
 import asyncio
 import libsql
 
+# Errores transitorios de Turso/Hrana: merece la pena reconectar y reintentar
+# (el stream se expira o la conexión HTTP se corta a mitad). No son bugs del SQL.
+_TRANSIENT = (
+    "stream not found", "stream_not_found",
+    "connection closed before message completed",
+    "connection reset", "connection aborted", "connection refused",
+    "stream was idle", "sqlite_busy", "http error", "502", "503", "504",
+    "timed out", "timeout", "broken pipe", "remotedisconnected", "incompleteread",
+)
+
+
+def _is_transient(e: Exception) -> bool:
+    s = str(e).lower()
+    return any(tok in s for tok in _TRANSIENT)
+
 
 class _CursorWrapper:
     def __init__(self, cursor):
@@ -72,23 +87,19 @@ class TursoConnection:
             pass
 
     async def execute(self, sql: str, params=()) -> _CursorWrapper:
-        try:
-            cursor = await asyncio.to_thread(self._conn.execute, sql, self._safe_params(params))
-            return _CursorWrapper(cursor)
-        except ValueError as e:
-            # Turso stream expirado (404 stream not found) — reconecta y reintenta 1 vez
-            if "stream not found" in str(e).lower() or "stream_not_found" in str(e).lower():
-                await self._reconnect()
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
                 cursor = await asyncio.to_thread(self._conn.execute, sql, self._safe_params(params))
                 return _CursorWrapper(cursor)
-            raise
-        except Exception as e:
-            # libsql a veces envuelve el error como Hrana api error con stream not found
-            if "stream not found" in str(e).lower():
+            except Exception as e:
+                last_exc = e
+                if not _is_transient(e):
+                    raise
+                # Turso stream expirado / conexión cortada — reconecta y reintenta con backoff
                 await self._reconnect()
-                cursor = await asyncio.to_thread(self._conn.execute, sql, self._safe_params(params))
-                return _CursorWrapper(cursor)
-            raise
+                await asyncio.sleep(0.3 * (attempt + 1))
+        raise last_exc if last_exc else RuntimeError("execute falló")
 
     async def executescript(self, script: str):
         # libsql sigue el modelo de sqlite3: separamos por ';' y ejecutamos una a una
@@ -99,20 +110,18 @@ class TursoConnection:
         await self.commit()
 
     async def commit(self):
-        try:
-            await asyncio.to_thread(self._conn.commit)
-        except ValueError as e:
-            if "stream not found" in str(e).lower():
-                await self._reconnect()
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
                 await asyncio.to_thread(self._conn.commit)
-            else:
-                raise
-        except Exception as e:
-            if "stream not found" in str(e).lower():
+                return
+            except Exception as e:
+                last_exc = e
+                if not _is_transient(e):
+                    raise
                 await self._reconnect()
-                await asyncio.to_thread(self._conn.commit)
-            else:
-                raise
+                await asyncio.sleep(0.3 * (attempt + 1))
+        raise last_exc if last_exc else RuntimeError("commit falló")
 
     async def close(self):
         await asyncio.to_thread(self._conn.close)

@@ -82,14 +82,20 @@ class StreaksCog(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild: return
         if len(message.content) < 3: return
-        await update_activity_streak(message.guild.id, message.author.id)
+        try:
+            await update_activity_streak(message.guild.id, message.author.id)
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before, after):
         if member.bot or not member.guild: return
         # si entra a VC, cuenta como actividad
         if before.channel is None and after.channel is not None:
-            await update_activity_streak(member.guild.id, member.id)
+            try:
+                await update_activity_streak(member.guild.id, member.id)
+            except Exception:
+                pass
 
     streaks = app_commands.Group(name="racha", description="Rachas diarias")
 

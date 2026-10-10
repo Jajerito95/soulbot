@@ -274,7 +274,10 @@ class MissionsCog(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild: return
         if len(message.content) < 2: return
-        await add_progress(message.guild.id, message.author.id, "messages", 1)
+        try:
+            await add_progress(message.guild.id, message.author.id, "messages", 1)
+        except Exception:
+            pass  # no dejar que un fallo de DB tumbe el listener de mensajes
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
@@ -289,7 +292,10 @@ class MissionsCog(commands.Cog):
     # but also we poll via events: we listen for custom dispatch
     @commands.Cog.listener()
     async def on_mission_progress(self, guild_id: int, user_id: int, typ: str, amount: int = 1):
-        await add_progress(guild_id, user_id, typ, amount)
+        try:
+            await add_progress(guild_id, user_id, typ, amount)
+        except Exception:
+            pass
 
     missions = app_commands.Group(name="misiones", description="Misiones diarias 5/5 + cajas sorpresa")
 

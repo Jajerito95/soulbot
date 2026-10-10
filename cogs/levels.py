@@ -149,6 +149,12 @@ class LevelsCog(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
+        try:
+            await self._on_message_impl(message)
+        except Exception:
+            pass  # un hipo de DB no debe romper el listener global de mensajes
+
+    async def _on_message_impl(self, message: discord.Message):
         config = await db.get_guild_config(message.guild.id)
         if not config["levels_enabled"]:
             return
@@ -179,31 +185,34 @@ class LevelsCog(commands.Cog):
 
     @tasks.loop(minutes=1)
     async def voice_xp_loop(self):
-        for guild in self.bot.guilds:
-            config = await db.get_guild_config(guild.id)
-            if not config["levels_enabled"]:
-                continue
-            for channel in guild.voice_channels:
-                if channel == guild.afk_channel:
+        try:
+            for guild in self.bot.guilds:
+                config = await db.get_guild_config(guild.id)
+                if not config["levels_enabled"]:
                     continue
-                for member in channel.members:
-                    if member.bot:
+                for channel in guild.voice_channels:
+                    if channel == guild.afk_channel:
                         continue
-                    # anti-farm: no XP si está sordo/muteado/suprimido (server o self) o es AFK
-                    vs = member.voice
-                    if vs and (vs.self_deaf or vs.deaf or vs.mute or vs.self_mute or vs.suppress or vs.afk):
-                        continue
-                    result = await award_xp(guild, member, config["voice_xp_per_minute"])
-                    if result["leveled_up"]:
-                        await self._announce_levelup(guild, member, result, None)
-                    # boss damage: XP × 5 (skip si boss reward)
-                    try:
-                        if not result.get("_boss_reward"):
-                            boss_cog = self.bot.get_cog("BossCog")
-                            if boss_cog:
-                                await boss_cog._handle_xp_damage(guild.id, member.id, result["amount"])
-                    except Exception:
-                        pass
+                    for member in channel.members:
+                        if member.bot:
+                            continue
+                        # anti-farm: no XP si está sordo/muteado/suprimido (server o self) o es AFK
+                        vs = member.voice
+                        if vs and (vs.self_deaf or vs.deaf or vs.mute or vs.self_mute or vs.suppress or vs.afk):
+                            continue
+                        result = await award_xp(guild, member, config["voice_xp_per_minute"])
+                        if result["leveled_up"]:
+                            await self._announce_levelup(guild, member, result, None)
+                        # boss damage: XP × 5 (skip si boss reward)
+                        try:
+                            if not result.get("_boss_reward"):
+                                boss_cog = self.bot.get_cog("BossCog")
+                                if boss_cog:
+                                    await boss_cog._handle_xp_damage(guild.id, member.id, result["amount"])
+                        except Exception:
+                            pass
+        except Exception:
+            pass  # no matar el loop por un hipo de DB
 
     @voice_xp_loop.before_loop
     async def before_voice_loop(self):
