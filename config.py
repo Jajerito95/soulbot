@@ -41,6 +41,10 @@ RESET_PASSWORD = os.getenv("RESET_PASSWORD", "")
 # Si no se define, se usa localhost (solo sirve en pruebas locales).
 PUBLIC_URL = os.getenv("PUBLIC_URL", f"http://localhost:{PORT}")
 
+# Repo de GitHub para /update (fallback sin git: descarga el zip de este repo)
+GITHUB_REPO = os.getenv("GITHUB_REPO", "Jajerito95/soulbot")
+GIT_BRANCH = os.getenv("GIT_BRANCH", "main")
+
 # ---------------- Vinculacion Minecraft <-> Discord (/code) ----------------
 # RCON del servidor de Minecraft (para aplicar roles con /role adduser)
 # PRODUCCIÓN: Usa Tailscale (100.x.x.x) o WireGuard. Ej: RCON_HOST=100.64.12.5

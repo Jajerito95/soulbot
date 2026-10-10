@@ -16,7 +16,7 @@ INTENTS.members = True
 INTENTS.message_content = True
 INTENTS.presences = False  # no se usa; ahorra ~50-100MB de caché
 
-COGS = ["cogs.embed", "cogs.welcome", "cogs.suggestions", "cogs.tickets", "cogs.setup", "cogs.logs", "cogs.emojiful", "cogs.purge", "cogs.sanction", "cogs.automod", "cogs.levels", "cogs.economy", "cogs.minigames", "cogs.boardgames", "cogs.appeals", "cogs.backups", "cogs.temproles", "cogs.maintenance", "cogs.code_sync", "cogs.colors", "cogs.giveaways", "cogs.missions", "cogs.relampago", "cogs.streaks", "cogs.boss", "cogs.whisper", "cogs.dbwatch"]
+COGS = ["cogs.embed", "cogs.welcome", "cogs.suggestions", "cogs.tickets", "cogs.setup", "cogs.logs", "cogs.emojiful", "cogs.purge", "cogs.sanction", "cogs.automod", "cogs.levels", "cogs.economy", "cogs.minigames", "cogs.boardgames", "cogs.appeals", "cogs.backups", "cogs.temproles", "cogs.maintenance", "cogs.code_sync", "cogs.colors", "cogs.giveaways", "cogs.missions", "cogs.relampago", "cogs.streaks", "cogs.boss", "cogs.whisper", "cogs.dbwatch", "cogs.updater"]
 
 
 class SoulBot(commands.Bot):
